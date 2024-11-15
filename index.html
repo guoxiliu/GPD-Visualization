@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<title>GPD visualization</title>
+        <link href="https://cdn.jsdelivr.net/npm/nouislider@15.6.1/dist/nouislider.min.css" rel="stylesheet">
+		<style>
+            
+			html, body { margin: 0; height: 100%;}
+            .container{
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center; /* Horizontal centering */
+                align-items: center;     /* Vertical centering */
+                margin: 0.5%;
+            }
+            .slider{
+                width: 30%;
+                margin: 2%;
+            }
+            #three-container{
+                margin: 0 auto;
+                height: 80%;
+                width: 80%;
+            }
+
+            #loading-overlay {
+                position: fixed;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(255, 255, 255, 0.8); /* Semi-transparent white */
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 9999;
+                top: 0;
+                left: 0;
+            }
+
+            .spinner {
+                border: 8px solid #f3f3f3; /* Light grey */
+                border-top: 8px solid #3498db; /* Blue */
+                border-radius: 50%;
+                width: 60px;
+                height: 60px;
+                animation: spin 2s linear infinite;
+            }
+
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+
+            #main-content {
+                display: none;
+                width: 100%;
+                height: 100%;
+            }
+		</style>
+	</head>
+	<body>
+        <div id="loading-overlay">
+            <div class="spinner"></div>
+            <p>Loading, please wait...</p>
+        </div>
+        <div id="main-content">
+            <div id="three-container"></div>
+            <div class="container">
+                <label for="dropdown1">Axis 1</label>
+                <select id="dropdown1" name="dropdown">
+                    <option value="" selected disabled hidden>Select an option</option>
+                    <option value="0">x</option>
+                    <option value="1">xi</option>
+                    <option value="2">t</option>
+                    <option value="3">Q2</option>
+                </select> 
+                <div class="slider" id="slider_1"></div>
+                <label for="dropdown2">Axis 2</label>
+                <select id="dropdown2" name="dropdown">
+                    <option value="" selected disabled hidden>Select an option</option>
+                    <option value="0">x</option>
+                    <option value="1">xi</option>
+                    <option value="2">t</option>
+                    <option value="3">Q2</option>
+                </select> 
+                <div class="slider" id="slider_2"></div>
+                <div id="reference">
+                    <div>
+                        <div style="font-weight: bold;">
+                            Reference
+                        </div>
+                        <div>
+                            <ol>
+                                <li>S. V. Goloskokov and P. Kroll, ‘The Role of the quark and gluon GPDs in hard vector-meson electroproduction’, Eur. Phys. J. C, vol. 53, pp. 367–384, 2008.</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div> 
+        </div>
+        <script type="module" src="colormap.js"></script>
+		<script type="module" src="/main.js"></script>
+	</body>
+</html>
