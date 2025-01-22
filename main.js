@@ -268,6 +268,8 @@ Promise.all([
             }
         }
 
+        // console.log(control_index)
+
         if(slider_changed){
             slider_changed = false
             for (let i = 0; i < positions.count; i++) {
@@ -281,6 +283,7 @@ Promise.all([
                 let gpd_value = (gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]) - min_gpd) / (max_gpd - min_gpd);
                 positions.setZ(i, gpd_value);
                 let color = evaluate_cmap(gpd_value, 'jet', false)
+
                 colors[i * 3] = color[0] / 255.
                 colors[i * 3 + 1] = color[1] / 255.
                 colors[i * 3 + 2] = color[2] / 255.
@@ -332,7 +335,8 @@ Promise.all([
         options[0] = selectedValue;
         updated_axis = true;
         slider_changed = true;
-        control_index = [0, 0]
+        control_index = [0, 0];
+        slider_1.noUiSlider.set(0) // add reset for sliders
         console.log('Selected option:', selectedValue);
         // Add additional actions based on selectedValue
     });
@@ -346,7 +350,8 @@ Promise.all([
         options[1] = selectedValue;
         updated_axis = true;
         slider_changed = true;
-        control_index = [0, 0]
+        control_index = [0, 0];
+        slider_2.noUiSlider.set(0) // add reset for sliders
         console.log('Selected option:', selectedValue);
         // Add additional actions based on selectedValue
     });
