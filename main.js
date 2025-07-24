@@ -6,28 +6,14 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { evaluate_cmap } from "./colormap.js"
-import gpd4d_bin from "./gpd_4d.bin"
-import Q2_bin from "./Q2.bin"
-import t_bin from "./t.bin"
-import x_bin from "./x.bin"
-import xi_bin from "./xi.bin"
 
 function load_array(url) {
-    return new Promise((resolve, reject) => {
-        fetch(url)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Failed to load ${url}, status: ${response.status}`);
-                }
-                console.log("load success ", url)
-                return response.arrayBuffer();
-            })
-            .then(arrayBuffer => {
-                resolve(arrayBuffer);
-            })
-            .catch(error => {
-                reject(error);
-            });
+    return fetch(url).then(response => {
+        if (!response.ok) {
+            throw new Error(`Failed to load ${url}, status: ${response.status}`);
+        }
+        console.log("load success ", url);
+        return response.arrayBuffer();
     });
 }
 
@@ -85,7 +71,12 @@ const dropdown2 = document.getElementById('dropdown2');
 dropdown1.value = "0";
 dropdown2.value = "2"
 
-const axis_names = ["x", "xi", "t", "Q2"]
+const axis_labels = [
+    'x',
+    'x\u1d62', // unicode subscript i
+    't',
+    'Q\u00b2' // unicode superscript 2
+];
 let options = [0, 2]
 let control_index = [0, 0];
 let slider_changed = true;
@@ -95,11 +86,11 @@ const slider_1 = document.getElementById('slider_1');
 const slider_2 = document.getElementById('slider_2');
 
 Promise.all([
-    load_array(gpd4d_bin),
-    load_array(x_bin),
-    load_array(xi_bin),
-    load_array(t_bin),
-    load_array(Q2_bin)
+    load_array("./data/gpd_4d.bin"),
+    load_array("./data/x.bin"),
+    load_array("./data/xi.bin"),
+    load_array("./data/t.bin"),
+    load_array("./data/Q2.bin")
 ])
 .then(([gpd_4d_flat, x, xi, t, Q2]) => {
     loading_overlay.style.display = 'none';
@@ -115,6 +106,10 @@ Promise.all([
     let dims = [x.length, xi.length, t.length, Q2.length]
     let gpd_4d = new ndarray(gpd_4d_flat, dims)
     let [min_gpd, max_gpd] = get_extreme(gpd_4d_flat)
+
+    // After you set min_gpd and max_gpd in your .then() block, update the colorbar labels:
+    document.querySelectorAll('.colorbar-labels')[0].textContent = `${max_gpd.toFixed(3)}`;
+    document.querySelectorAll('.colorbar-labels')[1].textContent = `${min_gpd.toFixed(3)}`;
 
     let container = document.getElementById("three-container")
     let camera = new THREE.PerspectiveCamera(75, container.clientWidth /  container.clientHeight, 0.1, 1000);
@@ -189,6 +184,14 @@ Promise.all([
         }
     });
 
+    // Helper to update slider labels to show remaining axes
+    function updateSliderLabels() {
+        // indices are calculated in animate(), but we need to update labels here as well
+        const remaining = [0, 1, 2, 3].filter(i => !options.includes(i));
+        document.getElementById('slider1-label').textContent = axis_labels[remaining[0]] + ': ';
+        document.getElementById('slider2-label').textContent = axis_labels[remaining[1]] + ': ';
+    }
+
     function animate() {
         if(updated_axis){
             updated_axis = false;
@@ -229,20 +232,14 @@ Promise.all([
                 }
             });
 
+            // Update slider labels to show remaining axes
+            updateSliderLabels();
+
             // console.log(arrays2[0].length, arrays2[1].length)
             scene = new THREE.Scene()
             geometry = new THREE.PlaneGeometry(1, 1, arrays2[0].length - 1, arrays2[1].length - 1);
             let plane = new THREE.Mesh(geometry, material)
-            let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_names[indices[0]], axis_names[indices[1]], "GPD")
-            let global_gridzx = new THREE.GridHelper(4, 4);
-            let global_gridxy = new THREE.GridHelper(4, 4);
-            let global_gridyz = new THREE.GridHelper(4, 4);
-            global_gridxy.rotation.x = Math.PI / 2;
-            global_gridyz.rotation.z = Math.PI / 2;
-        
-            scene.add(global_gridxy)
-            scene.add(global_gridyz)
-            scene.add(global_gridzx)
+            let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_labels[indices[0]], axis_labels[indices[1]], "GPD")
             global_axis.forEach(element => {
                 scene.add(element)
             });
@@ -251,7 +248,7 @@ Promise.all([
             scene.add(ambient_light); 
         
             axis_scene = new THREE.Scene()
-            let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_names[indices[0]], axis_names[indices[1]], "GPD")
+            let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_labels[indices[0]], axis_labels[indices[1]], "GPD")
             orient_axis.forEach(element => {
                 axis_scene.add(element);
             });
@@ -266,6 +263,10 @@ Promise.all([
                 positions.setX(i, xi_value);
                 positions.setY(i, Q2_value);
             }
+            
+            // Set the controls target to the center of the data surface
+            controls.target.set(0.5, 0.5, 0.5);
+            controls.update();
         }
 
         // console.log(control_index)
@@ -282,11 +283,11 @@ Promise.all([
                 query_index[indices[1]] = Q2_index
                 let gpd_value = (gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]) - min_gpd) / (max_gpd - min_gpd);
                 positions.setZ(i, gpd_value);
-                let color = evaluate_cmap(gpd_value, 'jet', false)
+                let color = evaluate_cmap(gpd_value, 'viridis', false);
 
-                colors[i * 3] = color[0] / 255.
-                colors[i * 3 + 1] = color[1] / 255.
-                colors[i * 3 + 2] = color[2] / 255.
+                colors[i * 3] = color[0] / 255.;
+                colors[i * 3 + 1] = color[1] / 255.;
+                colors[i * 3 + 2] = color[2] / 255.;
             }
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             positions.needsUpdate = true;
@@ -316,11 +317,11 @@ Promise.all([
     });
     
     slider_1.noUiSlider.on('change', function(values, handle) {
-        control_index[0] = Math.round(arrays1[0].indexOf(values[0]));
-        slider_changed = true
+        control_index[0] = Math.round(arrays1[0].indexOf(parseFloat(values[0])));
+        slider_changed = true;
     });
     slider_2.noUiSlider.on('change', function(values, handle) {
-        control_index[1] = Math.round(arrays1[1].indexOf(values[0]));
+        control_index[1] = Math.round(arrays1[1].indexOf(parseFloat(values[0])));
         slider_changed = true;
     });
 
@@ -328,7 +329,7 @@ Promise.all([
     dropdown1.addEventListener('change', function() {
         const selectedValue = Number(dropdown1.value);
         if (selectedValue == options[1]){
-            alert("Please select two different axis!")
+            showNotification("Please select two different axes!", "warning");
             dropdown1.value = options[0]
             return
         }
@@ -336,23 +337,60 @@ Promise.all([
         updated_axis = true;
         slider_changed = true;
         control_index = [0, 0];
-        slider_1.noUiSlider.set(0) // add reset for sliders
-        console.log('Selected option:', selectedValue);
-        // Add additional actions based on selectedValue
+        slider_1.noUiSlider.set(0);
+        showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
+        updateSliderLabels();
     });
+
     dropdown2.addEventListener('change', function() {
         const selectedValue = Number(dropdown2.value);
         if (selectedValue == options[0]){
-            alert("Please select two different axis!")
-            dropdown2.value = options[1]
-            return
+            showNotification("Please select two different axes!", "warning");
+            dropdown2.value = options[1];
+            return;
         }
         options[1] = selectedValue;
         updated_axis = true;
         slider_changed = true;
         control_index = [0, 0];
-        slider_2.noUiSlider.set(0) // add reset for sliders
-        console.log('Selected option:', selectedValue);
-        // Add additional actions based on selectedValue
+        slider_2.noUiSlider.set(0);
+        showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
+        updateSliderLabels();
     });
+
+    updateSliderLabels();
 })
+
+// Add notification system
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    
+    // Get the main content container
+    const mainContent = document.getElementById('main-content');
+    const rect = mainContent.getBoundingClientRect();
+    
+    Object.assign(notification.style, {
+        position: 'fixed',
+        top: `${rect.top + rect.height / 2 - 30}px`, // Center vertically in main-content
+        left: `${rect.left + rect.width / 2}px`,     // Center horizontally in main-content
+        transform: 'translateX(-50%)',               // Center the notification itself
+        padding: '15px 20px',
+        borderRadius: '5px',
+        color: 'white',
+        zIndex: '10001',
+        fontSize: '14px',
+        fontWeight: '500',
+        boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+        backgroundColor: type === 'success' ? '#4CAF50' : type === 'warning' ? '#FF9800' : '#2196F3',
+        textAlign: 'center',
+        minWidth: '200px'
+    });
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
