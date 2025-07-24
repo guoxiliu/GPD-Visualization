@@ -3,10 +3,13 @@
 <head>
     <meta charset="utf-8">
     <title>GPD Visualization</title>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script type="module" src="colormap.js"></script>
+    <script type="module" src="/main.js"></script>
+    
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/nouislider@15.6.1/dist/nouislider.min.css" rel="stylesheet">
     <style>
-        /* Keep only necessary custom styles */
         .colorbar {
             width: 20px;
             height: 200px;
@@ -70,6 +73,7 @@
         }
     </style>
 </head>
+
 <body class="d-flex flex-column vh-100">
     <div class="bg-primary text-white text-center py-4 shadow">
         <h1 class="mb-0">GPD Visualization</h1>
@@ -83,33 +87,33 @@
         <div class="container-fluid h-100">
             <div class="row h-100">
                 <div class="col-lg-4">
-                    <div class="card py-2 shadow h-100 d-flex flex-column">
+                    <div class="card py-2 shadow h-100 d-flex flex-column" style="position: relative;">
                         <div class="card-body flex-grow-1">
-                            <h3 class="card-title border-bottom pb-2 text-primary">⚙️ Controls</h3>
+                            <h3 class="card-title border-bottom pb-2 text-primary">⚙️ Settings</h3>
                             <div class="mb-4">
                                 <label for="dropdown1" class="form-label fw-semibold">Primary Axis</label>
                                 <select id="dropdown1" class="form-select">
                                     <option value="0">x</option>
-                                    <option value="1">x<sub>i</sub></option>
+                                    <option value="1">xᵢ</option>
                                     <option value="2">t</option>
-                                    <option value="3">Q<sup>2</sup></option>
+                                    <option value="3">Q²</option>
                                 </select>
                             </div>
                             <div class="mb-4">
                                 <label for="dropdown2" class="form-label fw-semibold">Secondary Axis</label>
                                 <select id="dropdown2" class="form-select">
                                     <option value="0">x</option>
-                                    <option value="1">x<sub>i</sub></option>
+                                    <option value="1">xᵢ</option>
                                     <option value="2">t</option>
-                                    <option value="3">Q<sup>2</sup></option>
+                                    <option value="3">Q²</option>
                                 </select>
                             </div>
-                            <div class="pt-2 mb-4">
+                            <div class="pt-4 mb-4">
                                 <div class="d-flex align-items-center mb-2 pb-4">
                                     <span id="slider1-label" class="me-2" style="min-width: 40px;">Value:</span>
                                     <div id="slider_1" class="flex-grow-1"></div>
                                 </div>
-                                <div class="d-flex align-items-center">
+                                <div class="d-flex align-items-center pt-2">
                                     <span id="slider2-label" class="me-2" style="min-width: 40px;">Value:</span>
                                     <div id="slider_2" class="flex-grow-1"></div>
                                 </div>
@@ -126,14 +130,43 @@
                         <div class="card-footer bg-transparent border-0">
                             <button class="help-button" data-bs-toggle="modal" data-bs-target="#helpModal">?</button>
                         </div>
+                        <!-- Notification container -->
+                        <div id="notification-container" style="position: absolute; right: 20px; bottom: 20px; z-index: 10001;"></div>
                     </div>
                 </div>
                 <div class="col-lg-8 h-100">
-                    <div id="three-container" class="bg-white rounded shadow position-relative h-100">
-                        <div class="colorbar-container position-absolute top-0 end-0 m-3 d-flex flex-column align-items-center">
-                            <div class="colorbar-labels">Max</div>
-                            <div class="colorbar"></div>
-                            <div class="colorbar-labels">Min</div>
+                    <div class="d-flex flex-column h-100">
+                        <!-- Scene Controls Panel -->
+                        <div class="bg-light border rounded-top p-2 d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center">
+                                <span class="text-muted mx-2 fw-semibold">View Controls</span>
+                                <button id="toggle-view-btn" class="btn btn-outline-primary btn-sm ms-2">
+                                    🗺️ 2D Heatmap
+                                </button>
+                                <button id="reset-view-btn" class="btn btn-outline-secondary btn-sm ms-2">
+                                    🔄 Reset View
+                                </button>
+                                <label for="colormap-select" class="form-label mb-0 ms-3 me-1">Colormap:</label>
+                                <select id="colormap-select" class="form-select form-select-sm w-auto me-2">
+                                    <option value="cividis">Cividis</option>
+                                    <option value="inferno">Inferno</option>
+                                    <option value="magma">Magma</option>
+                                    <option value="rainbow">Rainbow</option>
+                                    <option value="turbo">Turbo</option>
+                                    <option value="viridis">Viridis</option>
+                                </select>
+                            </div>
+                            <div class="text-muted small me-2">
+                                <span id="scene-info">Ready</span>
+                            </div>
+                        </div>
+                        <!-- Three.js Container -->
+                        <div id="three-container" class="bg-white rounded-bottm shadow position-relative flex-grow-1">
+                            <div class="colorbar-container position-absolute top-0 end-0 m-2 d-flex flex-column align-items-center">
+                                <div class="colorbar-labels">Max</div>
+                                <div class="colorbar"></div>
+                                <div class="colorbar-labels">Min</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -141,7 +174,7 @@
         </div>
     </div>
 
-    <!-- Help Modal (Bootstrap) -->
+    <!-- Help Modal -->
     <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -154,7 +187,7 @@
             <ul>
               <li><strong>Axis Selection:</strong> Choose which two parameters to use as axes in the visualization panel</li>
               <li><strong>Sliders:</strong> Adjust the values of the remaining two parameters</li>
-              <li><strong>3D View:</strong> Click and drag to rotate, scroll to zoom</li>
+              <li><strong>Visualization:</strong> Click and drag to rotate, scroll to zoom</li>
             </ul>
             <p><strong>Parameters:</strong></p>
             <ul>
@@ -163,14 +196,11 @@
               <li><strong>t:</strong></li>
               <li><strong>Q<sup>2</sup>:</strong></li>
             </ul>
-            <p>The surface shows the GPD values as a function of the two selected parameters.</p>
+            <p>The rendered scene shows the GPD values as a function of the two selected parameters.</p>
           </div>
         </div>
       </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script type="module" src="colormap.js"></script>
-    <script type="module" src="/main.js"></script>
 </body>
 </html>

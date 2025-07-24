@@ -7,12 +7,37 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { evaluate_cmap } from "./colormap.js"
 
+
+const axis_labels = [
+    'x',
+    'x\u1d62', // unicode subscript i
+    't',
+    'Q\u00b2' // unicode superscript 2
+];
+let chosen_vars = [1, 3]        // xi, Q2
+let remaining_vars = [0, 2];    // x, t
+let control_index = [0, 0];
+let slider_changed = true;
+let updated_axis = true;
+
+let loading_overlay = document.getElementById('loading-overlay');
+let main_content = document.getElementById('main-content');
+
+const dropdown1 = document.getElementById('dropdown1');
+const dropdown2 = document.getElementById('dropdown2');
+
+const slider_1 = document.getElementById('slider_1');
+const slider_2 = document.getElementById('slider_2');
+const toggleViewBtn = document.getElementById('toggle-view-btn');
+const resetViewBtn = document.getElementById('reset-view-btn');
+const colormapSelect = document.getElementById('colormap-select');
+
+
 function load_array(url) {
     return fetch(url).then(response => {
         if (!response.ok) {
             throw new Error(`Failed to load ${url}, status: ${response.status}`);
         }
-        console.log("load success ", url);
         return response.arrayBuffer();
     });
 }
@@ -54,7 +79,7 @@ function create_axis(center, width=8.0, scale=0.5, labelx="x", labely="y", label
 }
 
 function get_extreme(arr){
-    let maxv = -Number.MAX_VALUE;
+    let maxv = Number.MIN_VALUE;
     let minv = Number.MAX_VALUE;
     arr.forEach(val => {
         maxv = Math.max(maxv, val)
@@ -63,27 +88,97 @@ function get_extreme(arr){
     return [minv, maxv];
 }
 
-let loading_overlay = document.getElementById('loading-overlay');
-let main_content = document.getElementById('main-content');
+function resetView() {
+    // Reset main camera
+    camera.position.set(0.345, -0.597, 0.970);
+    camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
+    controls.target.set(0.5, 0.5, 0.5);
+    controls.update();
+    
+    // Reset axis camera to default orthographic settings
+    axis_camera.left = -2;
+    axis_camera.right = 2;
+    axis_camera.top = 2;
+    axis_camera.bottom = -2;
+    axis_camera.near = -1000;
+    axis_camera.far = 1000;
+    axis_camera.zoom = 1;
+    axis_camera.updateProjectionMatrix();
+    
+    updateSceneInfo('View reset to default');
+}
 
-const dropdown1 = document.getElementById('dropdown1');
-const dropdown2 = document.getElementById('dropdown2');
-dropdown1.value = "0";
-dropdown2.value = "2"
+// Notification system
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
 
-const axis_labels = [
-    'x',
-    'x\u1d62', // unicode subscript i
-    't',
-    'Q\u00b2' // unicode superscript 2
-];
-let options = [0, 2]
-let control_index = [0, 0];
-let slider_changed = true;
-let updated_axis = true;
+    // Use the dedicated notification container
+    const notificationContainer = document.getElementById('notification-container');
+    if (!notificationContainer) return;
 
-const slider_1 = document.getElementById('slider_1');
-const slider_2 = document.getElementById('slider_2');
+    Object.assign(notification.style, {
+        marginBottom: '8px',
+        padding: '15px 20px',
+        borderRadius: '5px',
+        color: 'white',
+        fontSize: '14px',
+        fontWeight: '500',
+        boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+        backgroundColor: type === 'success' ? '#4CAF50' : type === 'warning' ? '#FF9800' : '#2196F3',
+        textAlign: 'center',
+        minWidth: '200px',
+        maxWidth: '300px',
+        pointerEvents: 'none'
+    });
+
+    notificationContainer.appendChild(notification);
+
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
+
+
+// Function to update scene info display
+function updateSceneInfo(message) {
+    const sceneInfo = document.getElementById('scene-info');
+    if (sceneInfo) {
+        sceneInfo.textContent = message;
+    }
+}
+
+// Update slider labels to show remaining variables
+function updateSliderLabels() {
+    remaining_vars = [0, 1, 2, 3].filter(i => !chosen_vars.includes(i));
+    document.getElementById('slider1-label').textContent = axis_labels[remaining_vars[0]] + ': ';
+    document.getElementById('slider2-label').textContent = axis_labels[remaining_vars[1]] + ': ';
+}
+
+function updateColorbar(min, max, colormap) {
+    // Update min/max labels
+    const colorbarLabels = document.querySelectorAll('.colorbar-labels');
+    if (colorbarLabels.length >= 2) {
+        colorbarLabels[0].textContent = max.toFixed(3);
+        colorbarLabels[1].textContent = min.toFixed(3);
+    }
+    // Update colorbar gradient
+    const colorbar = document.querySelector('.colorbar');
+    if (colorbar) {
+        // Generate gradient stops for the selected colormap
+        let stops = [];
+        for (let i = 0; i <= 100; i += 10) {
+            const value = i / 100;
+            let rgb = evaluate_cmap(value, colormap, false);
+            if (!rgb || rgb.length !== 3) {
+                rgb = [255, 255, 255]; // fallback to white if colormap is invalid
+            }
+            stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
+        }
+        colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
+    }
+}
 
 Promise.all([
     load_array("./data/gpd_4d.bin"),
@@ -93,19 +188,25 @@ Promise.all([
     load_array("./data/Q2.bin")
 ])
 .then(([gpd_4d_flat, x, xi, t, Q2]) => {
+    gpd_4d_flat = new Float64Array(gpd_4d_flat);
+    x = new Float64Array(x);
+    xi = new Float64Array(xi);
+    t = new Float64Array(t);
+    Q2 = new Float64Array(Q2);
+
     loading_overlay.style.display = 'none';
     main_content.style.display = 'block';
-
-    gpd_4d_flat = new Float64Array(gpd_4d_flat)
-    x = new Float64Array(x)
-    xi = new Float64Array(xi)
-    t = new Float64Array(t)
-    Q2 = new Float64Array(Q2)
+    dropdown1.value = chosen_vars[0];
+    dropdown2.value = chosen_vars[1];
     
-    var x_xi_t_Q2_array = [x, xi, t, Q2]
-    let dims = [x.length, xi.length, t.length, Q2.length]
-    let gpd_4d = new ndarray(gpd_4d_flat, dims)
-    let [min_gpd, max_gpd] = get_extreme(gpd_4d_flat)
+    var x_xi_t_Q2_array = [x, xi, t, Q2];
+    let dims = [x.length, xi.length, t.length, Q2.length];
+    let gpd_4d = new ndarray(gpd_4d_flat, dims);
+    let [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
+    let is2DView = false;
+    let currentColormap = 'viridis';
+
+    console.log("min_gpd:", min_gpd, "max_gpd:", max_gpd);
 
     // After you set min_gpd and max_gpd in your .then() block, update the colorbar labels:
     document.querySelectorAll('.colorbar-labels')[0].textContent = `${max_gpd.toFixed(3)}`;
@@ -113,7 +214,8 @@ Promise.all([
 
     let container = document.getElementById("three-container")
     let camera = new THREE.PerspectiveCamera(75, container.clientWidth /  container.clientHeight, 0.1, 1000);
-    camera.position.set(0, 0, 0.7)
+    camera.position.set(0.345, -0.597, 0.970);
+    camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
 
     let renderer = new THREE.WebGLRenderer({antialias:true});
     renderer.setClearColor(.1, .1, .1) 
@@ -121,17 +223,16 @@ Promise.all([
     container.appendChild(renderer.domElement)
 
     let controls = new TrackballControls(camera, renderer.domElement);
-    controls.rotateSpeed = 10.0;
-    controls.zoomSpeed = 1.2;
+    controls.rotateSpeed = 3.0;
+    controls.zoomSpeed = 1.0;
 
-    let min_xi, max_xi, min_Q2, max_Q2;
+    let min_axis1, max_axis1, min_axis2, max_axis2;
     let arrays1 = [[], []];
     let arrays2 = [[], []];
     let scene;
     let positions;
     let colors;
     let axis_scene;
-    let indices;
     let geometry;
 
     let material = new THREE.MeshStandardMaterial({
@@ -147,6 +248,103 @@ Promise.all([
 
     let axis_camera = new THREE.OrthographicCamera(-2, 2, 2, -2, -1000, 1000);
 
+    function animate() {
+        if (updated_axis) {
+            updated_axis = false;
+            console.log("remaining_vars:", remaining_vars, "chosen_vars:", chosen_vars);
+
+            arrays1 = [x_xi_t_Q2_array[chosen_vars[0]], x_xi_t_Q2_array[chosen_vars[1]]];   // axes
+            arrays2 = [x_xi_t_Q2_array[remaining_vars[0]], x_xi_t_Q2_array[remaining_vars[1]]]; // sliders
+
+            [min_axis1, max_axis1] = get_extreme(arrays1[0]);
+            [min_axis2, max_axis2] = get_extreme(arrays1[1]);
+
+            slider_1.noUiSlider.updateOptions({
+                range: {
+                    min: 0,
+                    max: arrays2[0].length - 1
+                },
+                format: {
+                    to: function (value) { return arrays2[0][Math.round(value)]; },
+                    from: function (value) { return arrays2[0].indexOf(value); }
+                }
+            });
+
+            slider_2.noUiSlider.updateOptions({
+                range: {
+                    min: 0,
+                    max: arrays2[1].length - 1
+                },
+                format: {
+                    to: function (value) { return arrays2[1][Math.round(value)]; },
+                    from: function (value) { return arrays2[1].indexOf(value); }
+                }
+            });
+
+            scene = new THREE.Scene();
+            geometry = new THREE.PlaneGeometry(1, 1, arrays1[0].length - 1, arrays1[1].length - 1);
+            let plane = new THREE.Mesh(geometry, material);
+            let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+            global_axis.forEach(element => { scene.add(element); });
+            scene.add(plane);
+            scene.add(dir_light);
+            scene.add(ambient_light);
+
+            axis_scene = new THREE.Scene();
+            let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+            orient_axis.forEach(element => { axis_scene.add(element); });
+
+            positions = geometry.attributes.position;
+            colors = new Float32Array(positions.count * 3);
+            for (let i = 0; i < positions.count; i++) {
+                let axis2_index = Math.floor(i / arrays1[0].length);
+                let axis1_index = i % arrays1[0].length;
+                let axis1_value = (arrays1[0][axis1_index] - min_axis1) / (max_axis1 - min_axis1);
+                let axis2_value = (arrays1[1][axis2_index] - min_axis2) / (max_axis2 - min_axis2);
+                positions.setX(i, axis1_value);
+                positions.setY(i, axis2_value);
+            }
+            controls.target.set(0.5, 0.5, 0.5);
+            controls.update();
+        }
+
+        // console.log(control_index)
+
+        if (slider_changed) {
+            slider_changed = false;
+            for (let i = 0; i < positions.count; i++) {
+                let axis2_index = Math.floor(i / arrays1[0].length);
+                let axis1_index = i % arrays1[0].length;
+                let query_index = [0, 0, 0, 0];
+                query_index[remaining_vars[0]] = control_index[0];
+                query_index[remaining_vars[1]] = control_index[1];
+                query_index[chosen_vars[0]] = axis1_index;
+                query_index[chosen_vars[1]] = axis2_index;
+                let gpd_value = (gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]) - min_gpd) / (max_gpd - min_gpd);
+                positions.setZ(i, is2DView ? 0 : gpd_value);
+                let color = evaluate_cmap(gpd_value, currentColormap, false);
+
+                colors[i * 3] = color[0] / 255.;
+                colors[i * 3 + 1] = color[1] / 255.;
+                colors[i * 3 + 2] = color[2] / 255.;
+            }
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            positions.needsUpdate = true;
+            geometry.computeVertexNormals();
+        }
+
+        renderer.setViewport(0, 0, container.clientWidth, container.clientHeight);
+        controls.update();
+        renderer.clear();
+        renderer.render(scene, camera);
+
+        renderer.clearDepth();  
+        renderer.autoClear = false;
+        renderer.setViewport(0, 0, 300, 300);
+        renderer.render(axis_scene, axis_camera);
+    }
+
+    renderer.setAnimationLoop( animate );
 
     noUiSlider.create(slider_1, {
         start: [0],  
@@ -184,213 +382,116 @@ Promise.all([
         }
     });
 
-    // Helper to update slider labels to show remaining axes
-    function updateSliderLabels() {
-        // indices are calculated in animate(), but we need to update labels here as well
-        const remaining = [0, 1, 2, 3].filter(i => !options.includes(i));
-        document.getElementById('slider1-label').textContent = axis_labels[remaining[0]] + ': ';
-        document.getElementById('slider2-label').textContent = axis_labels[remaining[1]] + ': ';
+    updateSliderLabels();
+    updateColorbar(min_gpd, max_gpd, currentColormap);
+    updateSceneInfo('Scene ready');
+
+    /* Add event listeners below */
+    if (slider_1) {
+        slider_1.noUiSlider.on('change', function(values, handle) {
+            control_index[0] = Math.round(arrays2[0].indexOf(parseFloat(values[0])));
+            slider_changed = true;
+        });
+    }
+    if (slider_2) {
+        slider_2.noUiSlider.on('change', function(values, handle) {
+            control_index[1] = Math.round(arrays2[1].indexOf(parseFloat(values[0])));
+            slider_changed = true;
+        });
     }
 
-    function animate() {
-        if(updated_axis){
-            updated_axis = false;
-            indices = [0, 1, 2, 3].filter(element => !options.includes(element));
-            arrays1 = [x_xi_t_Q2_array[options[0]], x_xi_t_Q2_array[options[1]]];// x, t
-            arrays2 = [x_xi_t_Q2_array[indices[0]], x_xi_t_Q2_array[indices[1]]]; // xi, Q2
-
-            [min_xi, max_xi] = get_extreme(arrays2[0]); // xi
-            [min_Q2, max_Q2] = get_extreme(arrays2[1]); // Q2
-
-            slider_1.noUiSlider.updateOptions({
-                range: {
-                  min: 0,
-                  max: arrays1[0].length - 1
-                },
-                format: {
-                  to: function (value) {
-                      return arrays1[0][Math.round(value)];
-                  },
-                  from: function (value) {
-                      return arrays1[0].indexOf(value);
-                  }
-                }
-            });
-
-            slider_2.noUiSlider.updateOptions({
-                range: {
-                  min: 0,
-                  max: arrays1[1].length - 1
-                },
-                format: {
-                  to: function (value) {
-                      return arrays1[1][Math.round(value)];
-                  },
-                  from: function (value) {
-                      return arrays1[1].indexOf(value);
-                  }
-                }
-            });
-
-            // Update slider labels to show remaining axes
+    if (dropdown1) {
+        dropdown1.addEventListener('change', function() {
+            const selectedValue = Number(dropdown1.value);
+            if (selectedValue == chosen_vars[1]){
+                showNotification("Please select two different axes!", "warning");
+                dropdown1.value = chosen_vars[0];
+                return;
+            }
+            chosen_vars[0] = selectedValue;
+            updated_axis = true;
+            slider_changed = true;
+            control_index = [0, 0];
+            slider_1.noUiSlider.set(0);
+            slider_2.noUiSlider.set(0);
             updateSliderLabels();
-
-            // console.log(arrays2[0].length, arrays2[1].length)
-            scene = new THREE.Scene()
-            geometry = new THREE.PlaneGeometry(1, 1, arrays2[0].length - 1, arrays2[1].length - 1);
-            let plane = new THREE.Mesh(geometry, material)
-            let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_labels[indices[0]], axis_labels[indices[1]], "GPD")
-            global_axis.forEach(element => {
-                scene.add(element)
-            });
-            scene.add(plane)
-            scene.add(dir_light);
-            scene.add(ambient_light); 
-        
-            axis_scene = new THREE.Scene()
-            let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_labels[indices[0]], axis_labels[indices[1]], "GPD")
-            orient_axis.forEach(element => {
-                axis_scene.add(element);
-            });
-
-            positions = geometry.attributes.position;
-            colors = new Float32Array(positions.count * 3)
-            for (let i = 0; i < positions.count; i++) {
-                let Q2_index = Math.floor(i / arrays2[0].length)
-                let xi_index = i % arrays2[0].length // xi
-                let Q2_value = (arrays2[1][Q2_index] - min_Q2) / (max_Q2 - min_Q2)
-                let xi_value = (arrays2[0][xi_index] - min_xi) / (max_xi - min_xi)
-                positions.setX(i, xi_value);
-                positions.setY(i, Q2_value);
+            showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
+            updateColorbar(min_gpd, max_gpd, currentColormap);
+        });
+    }
+    if (dropdown2) {
+        dropdown2.addEventListener('change', function() {
+            const selectedValue = Number(dropdown2.value);
+            if (selectedValue == chosen_vars[0]){
+                showNotification("Please select two different axes!", "warning");
+                dropdown2.value = chosen_vars[1];
+                return;
             }
-            
-            // Set the controls target to the center of the data surface
-            controls.target.set(0.5, 0.5, 0.5);
-            controls.update();
-        }
-
-        // console.log(control_index)
-
-        if(slider_changed){
-            slider_changed = false
-            for (let i = 0; i < positions.count; i++) {
-                let Q2_index = Math.floor(i / arrays2[0].length)
-                let xi_index = i % arrays2[0].length
-                let query_index = [0, 0, 0, 0]
-                query_index[options[0]] = control_index[0]
-                query_index[options[1]] = control_index[1]
-                query_index[indices[0]] = xi_index
-                query_index[indices[1]] = Q2_index
-                let gpd_value = (gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]) - min_gpd) / (max_gpd - min_gpd);
-                positions.setZ(i, gpd_value);
-                let color = evaluate_cmap(gpd_value, 'viridis', false);
-
-                colors[i * 3] = color[0] / 255.;
-                colors[i * 3 + 1] = color[1] / 255.;
-                colors[i * 3 + 2] = color[2] / 255.;
-            }
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            positions.needsUpdate = true;
-            geometry.computeVertexNormals();
-        }
-
-        renderer.setViewport(0, 0, container.clientWidth, container.clientHeight)
-        controls.update()
-        renderer.clear();
-        renderer.render( scene, camera );
-
-        renderer.clearDepth();  
-        renderer.autoClear = false;
-        renderer.setViewport(0, 0, 300, 300);
-        axis_camera.position.copy(camera.position); 
-        axis_camera.quaternion.copy(camera.quaternion);
-        axis_camera.position.normalize();
-        renderer.render(axis_scene, axis_camera);
+            chosen_vars[1] = selectedValue;
+            updated_axis = true;
+            slider_changed = true;
+            control_index = [0, 0];
+            slider_1.noUiSlider.set(0);
+            slider_2.noUiSlider.set(0);
+            updateSliderLabels();
+            showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
+            updateColorbar(min_gpd, max_gpd, currentColormap);
+        });
     }
 
-    renderer.setAnimationLoop( animate );
+    if (toggleViewBtn) {
+        toggleViewBtn.addEventListener('click', function() {
+            is2DView = !is2DView;
+            toggleViewBtn.textContent = is2DView ? "🌐 3D View" : "🗺️ 2D Heatmap";
+            updateSceneInfo(is2DView ? "Switched to 2D heatmap" : "Switched to 3D view");
+            slider_changed = true;
+            updated_axis = true;
+        });
+    }
 
+    if (colormapSelect) {
+        colormapSelect.addEventListener('change', function() {
+            currentColormap = colormapSelect.value;
+            showNotification(`Colormap changed to ${currentColormap}`, "info");
+            slider_changed = true;
+            updateColorbar(min_gpd, max_gpd, currentColormap);
+        });
+    }
+
+    if (resetViewBtn) {
+        resetViewBtn.addEventListener('click', resetView);
+    }
+
+    // Window resize handling
     window.addEventListener('resize', function() {
         camera.aspect = container.clientWidth / container.clientHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(container.clientWidth, container.clientHeight);
     });
     
-    slider_1.noUiSlider.on('change', function(values, handle) {
-        control_index[0] = Math.round(arrays1[0].indexOf(parseFloat(values[0])));
-        slider_changed = true;
-    });
-    slider_2.noUiSlider.on('change', function(values, handle) {
-        control_index[1] = Math.round(arrays1[1].indexOf(parseFloat(values[0])));
-        slider_changed = true;
-    });
-
-    // Set a callback function to run when the selection changes
-    dropdown1.addEventListener('change', function() {
-        const selectedValue = Number(dropdown1.value);
-        if (selectedValue == options[1]){
-            showNotification("Please select two different axes!", "warning");
-            dropdown1.value = options[0]
-            return
+    // Keyboard shortcuts
+    window.addEventListener('keydown', function(event) {
+        if (event.ctrlKey && event.key === 'r') {
+            event.preventDefault();
+            resetView();
         }
-        options[0] = selectedValue;
-        updated_axis = true;
-        slider_changed = true;
-        control_index = [0, 0];
-        slider_1.noUiSlider.set(0);
-        showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
-        updateSliderLabels();
     });
 
-    dropdown2.addEventListener('change', function() {
-        const selectedValue = Number(dropdown2.value);
-        if (selectedValue == options[0]){
-            showNotification("Please select two different axes!", "warning");
-            dropdown2.value = options[1];
-            return;
-        }
-        options[1] = selectedValue;
-        updated_axis = true;
-        slider_changed = true;
-        control_index = [0, 0];
-        slider_2.noUiSlider.set(0);
-        showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
-        updateSliderLabels();
-    });
-
-    updateSliderLabels();
 })
-
-// Add notification system
-function showNotification(message, type = 'info') {
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    notification.textContent = message;
-    
-    // Get the main content container
-    const mainContent = document.getElementById('main-content');
-    const rect = mainContent.getBoundingClientRect();
-    
-    Object.assign(notification.style, {
-        position: 'fixed',
-        top: `${rect.top + rect.height / 2 - 30}px`, // Center vertically in main-content
-        left: `${rect.left + rect.width / 2}px`,     // Center horizontally in main-content
-        transform: 'translateX(-50%)',               // Center the notification itself
-        padding: '15px 20px',
-        borderRadius: '5px',
-        color: 'white',
-        zIndex: '10001',
-        fontSize: '14px',
-        fontWeight: '500',
-        boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
-        backgroundColor: type === 'success' ? '#4CAF50' : type === 'warning' ? '#FF9800' : '#2196F3',
-        textAlign: 'center',
-        minWidth: '200px'
-    });
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
-}
+.catch(error => {
+    console.error('Error loading data:', error);
+    loading_overlay.style.display = 'none';
+    main_content.innerHTML = `
+        <div style="color: red; text-align: center; margin-top: 50px; padding: 20px;">
+            <h3>Error Loading Data</h3>
+            <p>Failed to create the visualization scene.</p>
+            <div style="background-color: #ffebee; border: 1px solid #ffcdd2; border-radius: 4px; padding: 15px; margin: 20px auto; max-width: 600px; text-align: left;">
+                <strong>Error Details:</strong><br>
+                <code style="word-break: break-all;">${error.message}</code>
+            </div>
+            <p style="color: #666; font-size: 14px;">
+                Please check the browser console for more details and ensure all data files are available.
+            </p>
+        </div>
+    `;
+});
