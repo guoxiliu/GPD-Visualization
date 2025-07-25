@@ -19,20 +19,21 @@ let remaining_vars = [0, 2];    // x, t
 let control_index = [0, 0];
 let slider_changed = true;
 let updated_axis = true;
+let currentColormap = 'viridis';
 
 let loading_overlay = document.getElementById('loading-overlay');
 let main_content = document.getElementById('main-content');
 
 const dropdown1 = document.getElementById('dropdown1');
 const dropdown2 = document.getElementById('dropdown2');
-
 const slider_1 = document.getElementById('slider_1');
 const slider_2 = document.getElementById('slider_2');
+const playSlider1Btn = document.getElementById('play-slider1');
+const playSlider2Btn = document.getElementById('play-slider2');
+
 const toggleViewBtn = document.getElementById('toggle-view-btn');
 const resetViewBtn = document.getElementById('reset-view-btn');
 const colormapSelect = document.getElementById('colormap-select');
-const playSlider1Btn = document.getElementById('play-slider1');
-const playSlider2Btn = document.getElementById('play-slider2');
 
 function load_array(url) {
     return fetch(url).then(response => {
@@ -191,16 +192,31 @@ function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag,
         control_index[idx] = current;
         slider_changed = true;
         slider.noUiSlider.set(current);
-    }, 120);
+    }, 100);
 }
 
-Promise.all([
-    load_array("./data/gpd_4d.bin"),
-    load_array("./data/x.bin"),
-    load_array("./data/xi.bin"),
-    load_array("./data/t.bin"),
-    load_array("./data/Q2.bin")
-])
+function loadDataFile() {
+    const loadingText = document.querySelector('#loading-overlay .loading-text');
+    const dataFiles = [
+        { name: "GPD data (gpd_4d.bin)", path: "data/gpd_4d.bin" },
+        { name: "x values (x.bin)", path: "data/x.bin" },
+        { name: "xi values (xi.bin)", path: "data/xi.bin" },
+        { name: "t values (t.bin)", path: "data/t.bin" },
+        { name: "Q² values (Q2.bin)", path: "data/Q2.bin" }
+    ];
+    
+    const results = [];
+    for (const file of dataFiles) {
+        if (loadingText) {
+            loadingText.textContent = `Loading ${file.name}...`;
+        }
+        const dataArray = load_array(file.path);
+        results.push(dataArray);
+    }
+    return results;
+}
+
+Promise.all(loadDataFile())
 .then(([gpd_4d_flat, x, xi, t, Q2]) => {
     gpd_4d_flat = new Float64Array(gpd_4d_flat);
     x = new Float64Array(x);
@@ -212,13 +228,13 @@ Promise.all([
     main_content.style.display = 'block';
     dropdown1.value = chosen_vars[0];
     dropdown2.value = chosen_vars[1];
+    colormapSelect.value = currentColormap;
     
     var x_xi_t_Q2_array = [x, xi, t, Q2];
     let dims = [x.length, xi.length, t.length, Q2.length];
     let gpd_4d = new ndarray(gpd_4d_flat, dims);
     let [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
     let is2DView = false;
-    let currentColormap = 'viridis';
     let camera_3d_state = {};
 
     console.log("min_gpd:", min_gpd, "max_gpd:", max_gpd);
@@ -552,7 +568,6 @@ Promise.all([
 
 })
 .catch(error => {
-    console.error('Error loading data:', error);
     loading_overlay.style.display = 'none';
     main_content.innerHTML = `
         <div style="color: red; text-align: center; margin-top: 50px; padding: 20px;">
