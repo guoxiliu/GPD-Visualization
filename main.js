@@ -31,7 +31,8 @@ const slider_2 = document.getElementById('slider_2');
 const toggleViewBtn = document.getElementById('toggle-view-btn');
 const resetViewBtn = document.getElementById('reset-view-btn');
 const colormapSelect = document.getElementById('colormap-select');
-
+const playSlider1Btn = document.getElementById('play-slider1');
+const playSlider2Btn = document.getElementById('play-slider2');
 
 function load_array(url) {
     return fetch(url).then(response => {
@@ -86,26 +87,6 @@ function get_extreme(arr){
         minv = Math.min(minv, val)
     })
     return [minv, maxv];
-}
-
-function resetView() {
-    // Reset main camera
-    camera.position.set(0.345, -0.597, 0.970);
-    camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
-    controls.target.set(0.5, 0.5, 0.5);
-    controls.update();
-    
-    // Reset axis camera to default orthographic settings
-    axis_camera.left = -2;
-    axis_camera.right = 2;
-    axis_camera.top = 2;
-    axis_camera.bottom = -2;
-    axis_camera.near = -1000;
-    axis_camera.far = 1000;
-    axis_camera.zoom = 1;
-    axis_camera.updateProjectionMatrix();
-    
-    updateSceneInfo('View reset to default');
 }
 
 // Notification system
@@ -180,6 +161,39 @@ function updateColorbar(min, max, colormap) {
     }
 }
 
+function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag, intervalVar) {
+    // If it's already playing, stop it
+    if (window[playingFlag]) {
+        window[playingFlag] = false;
+        playBtn.textContent = "▶️"; // Play icon
+        clearInterval(window[intervalVar]);
+        window[intervalVar] = null;
+        return;
+    }
+
+    window[playingFlag] = true;
+    playBtn.textContent = "⏸️";
+
+    window[intervalVar] = setInterval(() => {
+        if (!window[playingFlag]) {
+            clearInterval(window[intervalVar]);
+            window[intervalVar] = null;
+            playBtn.textContent = "▶️";
+            return;
+        }
+
+        let current = control_index[idx];
+        current++;
+        if (current > dataArray.length - 1) {
+            current = 0; // Loop back to the start
+        }
+        
+        control_index[idx] = current;
+        slider_changed = true;
+        slider.noUiSlider.set(current);
+    }, 120);
+}
+
 Promise.all([
     load_array("./data/gpd_4d.bin"),
     load_array("./data/x.bin"),
@@ -205,6 +219,7 @@ Promise.all([
     let [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
     let is2DView = false;
     let currentColormap = 'viridis';
+    let camera_3d_state = {};
 
     console.log("min_gpd:", min_gpd, "max_gpd:", max_gpd);
 
@@ -251,7 +266,6 @@ Promise.all([
     function animate() {
         if (updated_axis) {
             updated_axis = false;
-            console.log("remaining_vars:", remaining_vars, "chosen_vars:", chosen_vars);
 
             arrays1 = [x_xi_t_Q2_array[chosen_vars[0]], x_xi_t_Q2_array[chosen_vars[1]]];   // axes
             arrays2 = [x_xi_t_Q2_array[remaining_vars[0]], x_xi_t_Q2_array[remaining_vars[1]]]; // sliders
@@ -264,10 +278,9 @@ Promise.all([
                     min: 0,
                     max: arrays2[0].length - 1
                 },
-                format: {
-                    to: function (value) { return arrays2[0][Math.round(value)]; },
-                    from: function (value) { return arrays2[0].indexOf(value); }
-                }
+                tooltips: { 
+                    to: function (value) { return arrays2[0][Math.round(value)]; } 
+                },
             });
 
             slider_2.noUiSlider.updateOptions({
@@ -275,10 +288,9 @@ Promise.all([
                     min: 0,
                     max: arrays2[1].length - 1
                 },
-                format: {
-                    to: function (value) { return arrays2[1][Math.round(value)]; },
-                    from: function (value) { return arrays2[1].indexOf(value); }
-                }
+                tooltips: { 
+                    to: function (value) { return arrays2[1][Math.round(value)]; } 
+                },
             });
 
             scene = new THREE.Scene();
@@ -308,8 +320,6 @@ Promise.all([
             controls.update();
         }
 
-        // console.log(control_index)
-
         if (slider_changed) {
             slider_changed = false;
             for (let i = 0; i < positions.count; i++) {
@@ -338,65 +348,102 @@ Promise.all([
         renderer.clear();
         renderer.render(scene, camera);
 
+        axis_camera.quaternion.copy(camera.quaternion);
+
         renderer.clearDepth();  
         renderer.autoClear = false;
         renderer.setViewport(0, 0, 300, 300);
         renderer.render(axis_scene, axis_camera);
     }
-
     renderer.setAnimationLoop( animate );
 
     noUiSlider.create(slider_1, {
         start: [0],  
-        tooltips: true,  
+        tooltips: { 
+            to: function (value) { return arrays2[0][Math.round(value)]; } 
+        },
         step: 1,
         range: {
             min: 0,
-            max: arrays1[0].length - 1
-          },
-          format: {
-            to: function (value) {
-                return arrays1[0][Math.round(value)];
-            },
-            from: function (value) {
-                return arrays1[0].indexOf(value);
-            }
-          }
+            max: arrays2[0].length - 1
+        },
     });
 
     noUiSlider.create(slider_2, {
         start: [0], 
-        tooltips: true,  
+        tooltips: { 
+            to: function (value) { return arrays2[0][Math.round(value)]; } 
+        },
         step: 1,
         range: {
             min: 0,
-            max: arrays1[1].length - 1
-          },
-        format: {
-            to: function (value) {
-                return arrays1[1][Math.round(value)];
-            },
-            from: function (value) {
-                return arrays1[1].indexOf(value);
-            }
-        }
+            max: arrays2[1].length - 1
+        },
     });
 
     updateSliderLabels();
     updateColorbar(min_gpd, max_gpd, currentColormap);
     updateSceneInfo('Scene ready');
 
+    function resetView() {
+        // Reset main camera
+        camera.position.set(0.345, -0.597, 0.970);
+        camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
+        controls.target.set(0.5, 0.5, 0.5);
+        controls.update();
+        
+        // Reset axis camera to default orthographic settings
+        axis_camera.left = -2;
+        axis_camera.right = 2;
+        axis_camera.top = 2;
+        axis_camera.bottom = -2;
+        axis_camera.near = -1000;
+        axis_camera.far = 1000;
+        axis_camera.zoom = 1;
+        axis_camera.updateProjectionMatrix();
+        
+        updateSceneInfo('View reset to default');
+    }
+
     /* Add event listeners below */
     if (slider_1) {
         slider_1.noUiSlider.on('change', function(values, handle) {
-            control_index[0] = Math.round(arrays2[0].indexOf(parseFloat(values[0])));
+            control_index[0] = Number(values[0]);
             slider_changed = true;
+        });
+        // Stop animation if user interacts with slider manually
+        slider_1.noUiSlider.on('start', function() {
+            if (window.slider1Playing) {
+                window.slider1Playing = false;
+                playSlider1Btn.textContent = "▶️";
+                clearInterval(window.slider1Interval);
+                window.slider1Interval = null;
+            }
         });
     }
     if (slider_2) {
         slider_2.noUiSlider.on('change', function(values, handle) {
-            control_index[1] = Math.round(arrays2[1].indexOf(parseFloat(values[0])));
+            control_index[1] = Number(values[0]);
             slider_changed = true;
+        });
+        slider_2.noUiSlider.on('start', function() {
+            if (window.slider2Playing) {
+                window.slider2Playing = false;
+                playSlider2Btn.textContent = "▶️";
+                clearInterval(window.slider2Interval);
+                window.slider2Interval = null;
+            }
+        });
+    }
+
+    if (playSlider1Btn) {
+        playSlider1Btn.addEventListener('click', function() {
+            animateSlider(slider_1, arrays2[0], control_index, 0, playSlider1Btn, 'slider1Playing', 'slider1Interval');
+        });
+    }
+    if (playSlider2Btn) {
+        playSlider2Btn.addEventListener('click', function() {
+            animateSlider(slider_2, arrays2[1], control_index, 1, playSlider2Btn, 'slider2Playing', 'slider2Interval');
         });
     }
 
@@ -444,8 +491,34 @@ Promise.all([
             is2DView = !is2DView;
             toggleViewBtn.textContent = is2DView ? "🌐 3D View" : "🗺️ 2D Heatmap";
             updateSceneInfo(is2DView ? "Switched to 2D heatmap" : "Switched to 3D view");
-            slider_changed = true;
-            updated_axis = true;
+            
+            if (is2DView) {
+                // Save current 3D camera state
+                camera_3d_state.up = camera.up.clone();
+                camera_3d_state.position = camera.position.clone();
+                camera_3d_state.quaternion = camera.quaternion.clone();
+                camera_3d_state.target = controls.target.clone();
+
+                // Switch to 2D top-down view
+                camera.position.set(0.5, 0.5, 2);
+                camera.quaternion.set(0, 0, 0, 1); // Reset rotation
+                camera.up.set(0, 1, 0); // Ensure Y is up
+                controls.target.set(0.5, 0.5, 0);
+                controls.noRotate = true; // Disable rotation
+            } else {
+                // Restore 3D camera state
+                if (camera_3d_state.position) {
+                    camera.up.copy(camera_3d_state.up);
+                    camera.position.copy(camera_3d_state.position);
+                    camera.quaternion.copy(camera_3d_state.quaternion);
+                    controls.target.copy(camera_3d_state.target);
+                } else {
+                    // Fallback to reset view if no state saved
+                    resetView();
+                }
+                controls.noRotate = false; // Enable rotation
+            }
+            controls.update();
         });
     }
 
