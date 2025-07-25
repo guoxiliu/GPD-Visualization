@@ -1,112 +1,175 @@
 <!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8">
-		<title>GPD visualization</title>
-        <link href="https://cdn.jsdelivr.net/npm/nouislider@15.6.1/dist/nouislider.min.css" rel="stylesheet">
-		<style>
-            
-			html, body { margin: 0; height: 100%;}
-            .container{
-                display: flex;
-                flex-wrap: wrap;
-                justify-content: center; /* Horizontal centering */
-                align-items: center;     /* Vertical centering */
-                margin: 0.5%;
-            }
-            .slider{
-                width: 30%;
-                margin: 2%;
-            }
-            #three-container{
-                margin: 0 auto;
-                height: 80%;
-                width: 80%;
-            }
-
-            #loading-overlay {
-                position: fixed;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(255, 255, 255, 0.8); /* Semi-transparent white */
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 9999;
-                top: 0;
-                left: 0;
-            }
-
-            .spinner {
-                border: 8px solid #f3f3f3; /* Light grey */
-                border-top: 8px solid #3498db; /* Blue */
-                border-radius: 50%;
-                width: 60px;
-                height: 60px;
-                animation: spin 2s linear infinite;
-            }
-
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-
-            #main-content {
-                display: none;
-                width: 100%;
-                height: 100%;
-            }
-
-		</style>
-		<script type="module" crossorigin src="./assets/index-Byi8lITh.js"></script>
-	</head>
-	<body>
-        <div class="container">
-            GPD Visualization
-        </div>
-
-        <div class="container">
-            Yansong Yu
-        </div>
-        
-        <div id="loading-overlay">
-            <div class="spinner"></div>
-            <p>Loading, please wait...</p>
-        </div>
-        <div id="main-content">
-            <div id="three-container"></div>
-            <div class="container">
-                <label for="dropdown1">Axis 1</label>
-                <select id="dropdown1" name="dropdown">
-                    <option value="" selected disabled hidden>Select an option</option>
-                    <option value="0">x</option>
-                    <option value="1">xi</option>
-                    <option value="2">t</option>
-                    <option value="3">Q2</option>
-                </select> 
-                <div class="slider" id="slider_1"></div>
-                <label for="dropdown2">Axis 2</label>
-                <select id="dropdown2" name="dropdown">
-                    <option value="" selected disabled hidden>Select an option</option>
-                    <option value="0">x</option>
-                    <option value="1">xi</option>
-                    <option value="2">t</option>
-                    <option value="3">Q2</option>
-                </select> 
-                <div class="slider" id="slider_2"></div>
-                <div id="reference">
-                    <div>
-                        <div style="font-weight: bold;">
-                            Reference
+<head>
+    <meta charset="utf-8">
+    <title>GPD Visualization</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/nouislider@15.6.1/dist/nouislider.min.css" rel="stylesheet">
+    <style>
+        /* Keep only necessary custom styles */
+        .colorbar {
+            width: 20px;
+            height: 200px;
+            background: linear-gradient(to top, #440154, #31688e, #35b779, #fde725);
+            border-radius: 3px;
+        }
+        .colorbar-labels {
+            font-size: 0.8em;
+            color: #555;
+            text-align: center;
+        }
+        #loading-overlay {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            top: 0;
+            left: 0;
+            color: white;
+        }
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        .loading-text {
+            font-size: 1.2em;
+            font-weight: 300;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .help-button {
+            position: static;
+            bottom: 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+        .help-button:hover {
+            background: #5a6fd8;
+            transform: scale(1.2);
+        }
+    </style>
+  <script type="module" crossorigin src="/assets/index-DKEPeoTT.js"></script>
+</head>
+<body class="d-flex flex-column vh-100">
+    <div class="bg-primary text-white text-center py-4 shadow">
+        <h1 class="mb-0">GPD Visualization</h1>
+        <div class="fs-5 opacity-75">Yansong Yu, Guoxi Liu</div>
+    </div>
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading data files...</div>
+    </div>
+    <div id="main-content" class="py-3 h-100">
+        <div class="container-fluid h-100">
+            <div class="row h-100">
+                <div class="col-lg-4">
+                    <div class="card py-2 shadow h-100 d-flex flex-column">
+                        <div class="card-body flex-grow-1">
+                            <h3 class="card-title border-bottom pb-2 text-primary">⚙️ Controls</h3>
+                            <div class="mb-4">
+                                <label for="dropdown1" class="form-label fw-semibold">Primary Axis</label>
+                                <select id="dropdown1" class="form-select">
+                                    <option value="0">x</option>
+                                    <option value="1">x<sub>i</sub></option>
+                                    <option value="2">t</option>
+                                    <option value="3">Q<sup>2</sup></option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label for="dropdown2" class="form-label fw-semibold">Secondary Axis</label>
+                                <select id="dropdown2" class="form-select">
+                                    <option value="0">x</option>
+                                    <option value="1">x<sub>i</sub></option>
+                                    <option value="2">t</option>
+                                    <option value="3">Q<sup>2</sup></option>
+                                </select>
+                            </div>
+                            <div class="pt-2 mb-4">
+                                <div class="d-flex align-items-center mb-2 pb-4">
+                                    <span id="slider1-label" class="me-2" style="min-width: 40px;">Value:</span>
+                                    <div id="slider_1" class="flex-grow-1"></div>
+                                </div>
+                                <div class="d-flex align-items-center">
+                                    <span id="slider2-label" class="me-2" style="min-width: 40px;">Value:</span>
+                                    <div id="slider_2" class="flex-grow-1"></div>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-body">
+                                    <h4 class="card-title text-primary">📚 Reference</h4>
+                                    <ol class="mb-0">
+                                        <li>S. V. Goloskokov and P. Kroll, "The role of the quark and gluon GPDs in hard vector-meson electroproduction", <em>The European Physical Journal C</em>, vol. 53, pp. 367–384, 2008.</li>
+                                    </ol>
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <ol>
-                                <li>S. V. Goloskokov and P. Kroll, ‘The Role of the quark and gluon GPDs in hard vector-meson electroproduction’, Eur. Phys. J. C, vol. 53, pp. 367–384, 2008.</li>
-                            </ol>
+                        <div class="card-footer bg-transparent border-0">
+                            <button class="help-button" data-bs-toggle="modal" data-bs-target="#helpModal">?</button>
                         </div>
                     </div>
                 </div>
-            </div> 
+                <div class="col-lg-8 h-100">
+                    <div id="three-container" class="bg-white rounded shadow position-relative h-100">
+                        <div class="colorbar-container position-absolute top-0 end-0 m-3 d-flex flex-column align-items-center">
+                            <div class="colorbar-labels">Max</div>
+                            <div class="colorbar"></div>
+                            <div class="colorbar-labels">Min</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-	</body>
+    </div>
+
+    <!-- Help Modal (Bootstrap) -->
+    <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="modal-title" id="helpModalLabel">How to Use</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p><strong>Controls:</strong></p>
+            <ul>
+              <li><strong>Axis Selection:</strong> Choose which two parameters to use as axes in the visualization panel</li>
+              <li><strong>Sliders:</strong> Adjust the values of the remaining two parameters</li>
+              <li><strong>3D View:</strong> Click and drag to rotate, scroll to zoom</li>
+            </ul>
+            <p><strong>Parameters:</strong></p>
+            <ul>
+              <li><strong>x:</strong></li>
+              <li><strong>x<sub>i</sub>:</strong></li>
+              <li><strong>t:</strong></li>
+              <li><strong>Q<sup>2</sup>:</strong></li>
+            </ul>
+            <p>The surface shows the GPD values as a function of the two selected parameters.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
 </html>
