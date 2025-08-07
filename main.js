@@ -19,7 +19,6 @@ let remaining_vars = [0, 2];    // x, t
 let control_index = [0, 0];
 let slider_changed = true;
 let updated_axis = true;
-let currentColormap = 'viridis';
 
 let loading_overlay = document.getElementById('loading-overlay');
 let main_content = document.getElementById('main-content');
@@ -35,16 +34,18 @@ const toggleViewBtn = document.getElementById('toggle-view-btn');
 const resetViewBtn = document.getElementById('reset-view-btn');
 const colormapSelect = document.getElementById('colormap-select');
 
-function load_array(url) {
-    return fetch(url).then(response => {
-        if (!response.ok) {
-            throw new Error(`Failed to load ${url}, status: ${response.status}`);
-        }
-        return response.arrayBuffer();
-    });
-}
+// Dual colormap controls
+let currentColormap = 'viridis';
+let currentPositiveColormap = 'hot';
+let currentNegativeColormap = 'cool';
+let useDualColormaps = false;
+const dualColormapToggle = document.getElementById('dual-colormap-toggle');
+const singleColormapControls = document.getElementById('single-colormap-controls');
+const dualColormapControls = document.getElementById('dual-colormap-controls');
+const positiveColormapSelect = document.getElementById('positive-colormap-select');
+const negativeColormapSelect = document.getElementById('negative-colormap-select');
 
-function create_label(text, color) {
+function create_axis_label(text, color) {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     canvas.width = 400
@@ -58,7 +59,7 @@ function create_label(text, color) {
     return sprite;
 }
 
-function create_line(start, end, width, color){
+function create_axis_line(start, end, width, color){
     const geometry = new LineSegmentsGeometry().setPositions([start.x, start.y, start.z, end.x, end.y, end.z])
     const material = new LineMaterial({
         color: color,   
@@ -68,16 +69,29 @@ function create_line(start, end, width, color){
 }
 
 function create_axis(center, width=8.0, scale=0.5, labelx="x", labely="y", labelz="z", colorx = '#ff0000', colory='#00ff00', colorz='#0000ff') {
-    let x_axis = create_line(center, new THREE.Vector3(center.x + scale, center.y, center.z), width, colorx)
-    let y_axis = create_line(center, new THREE.Vector3(center.x, center.y + scale, center.z), width, colory)
-    let z_axis = create_line(center, new THREE.Vector3(center.x, center.y, center.z + scale), width, colorz)
-    let x_label = create_label(labelx, colorx)
-    let y_label = create_label(labely, colory)
-    let z_label = create_label(labelz, colorz)
+    let x_axis = create_axis_line(center, new THREE.Vector3(center.x + scale, center.y, center.z), width, colorx)
+    let y_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y + scale, center.z), width, colory)
+    let z_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y, center.z + scale), width, colorz)
+    let x_label = create_axis_label(labelx, colorx)
+    let y_label = create_axis_label(labely, colory)
+    let z_label = create_axis_label(labelz, colorz)
     x_label.position.set(center.x + scale + 0.5, center.y, center.z);
     y_label.position.set(center.x, center.y + scale + 0.5, center.z);
     z_label.position.set(center.x, center.y, center.z + scale + 0.5);
     return [x_axis, y_axis, z_axis, x_label, y_label, z_label];
+}
+
+// Function to evaluate dual colormaps for positive and negative values
+function evaluateDualColormap(value, positiveColormap, negativeColormap, minValue, maxValue, midpoint = 0) {
+    if (value >= midpoint) {
+        // Normalize positive values from midpoint to maxValue
+        const normalizedValue = Math.min(1, Math.max(0, (value - midpoint) / (maxValue - midpoint)));
+        return evaluate_cmap(normalizedValue, positiveColormap, false);
+    } else {
+        // Normalize negative values from minValue to midpoint
+        const normalizedValue = Math.min(1, Math.max(0, (midpoint - value) / (midpoint - minValue)));
+        return evaluate_cmap(normalizedValue, negativeColormap, false);
+    }
 }
 
 function get_extreme(arr){
@@ -88,6 +102,15 @@ function get_extreme(arr){
         minv = Math.min(minv, val)
     })
     return [minv, maxv];
+}
+
+function load_array(url) {
+    return fetch(url).then(response => {
+        if (!response.ok) {
+            throw new Error(`Failed to load ${url}, status: ${response.status}`);
+        }
+        return response.arrayBuffer();
+    });
 }
 
 // Notification system
@@ -122,7 +145,6 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-
 // Function to update scene info display
 function updateSceneInfo(message) {
     const sceneInfo = document.getElementById('scene-info');
@@ -145,20 +167,48 @@ function updateColorbar(min, max, colormap) {
         colorbarLabels[0].textContent = max.toFixed(3);
         colorbarLabels[1].textContent = min.toFixed(3);
     }
+    
     // Update colorbar gradient
     const colorbar = document.querySelector('.colorbar');
     if (colorbar) {
-        // Generate gradient stops for the selected colormap
-        let stops = [];
-        for (let i = 0; i <= 100; i += 10) {
-            const value = i / 100;
-            let rgb = evaluate_cmap(value, colormap, false);
-            if (!rgb || rgb.length !== 3) {
-                rgb = [255, 255, 255]; // fallback to white if colormap is invalid
+        if (useDualColormaps || colormap === 'dual') {
+            // Create a dual colormap gradient
+            let stops = [];
+            
+            // Negative values (bottom half)
+            for (let i = 0; i <= 50; i += 10) {
+                const value = (50 - i) / 50; // Reverse for negative values
+                let rgb = evaluate_cmap(value, currentNegativeColormap, false);
+                if (!rgb || rgb.length !== 3) {
+                    rgb = [255, 255, 255];
+                }
+                stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
             }
-            stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
+            
+            // Positive values (top half)
+            for (let i = 50; i <= 100; i += 10) {
+                const value = (i - 50) / 50;
+                let rgb = evaluate_cmap(value, currentPositiveColormap, false);
+                if (!rgb || rgb.length !== 3) {
+                    rgb = [255, 255, 255];
+                }
+                stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
+            }
+            
+            colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
+        } else {
+            // Single colormap (existing code)
+            let stops = [];
+            for (let i = 0; i <= 100; i += 10) {
+                const value = i / 100;
+                let rgb = evaluate_cmap(value, colormap, false);
+                if (!rgb || rgb.length !== 3) {
+                    rgb = [255, 255, 255]; // fallback to white if colormap is invalid
+                }
+                stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
+            }
+            colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
         }
-        colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
     }
 }
 
@@ -188,10 +238,10 @@ function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag,
         if (current > dataArray.length - 1) {
             current = 0; // Loop back to the start
         }
-        
         control_index[idx] = current;
         slider_changed = true;
         slider.noUiSlider.set(current);
+        updateColorbar(min_gpd, max_gpd, useDualColormaps ? 'dual' : currentColormap);
     }, 100);
 }
 
@@ -346,9 +396,18 @@ Promise.all(loadDataFile())
                 query_index[remaining_vars[1]] = control_index[1];
                 query_index[chosen_vars[0]] = axis1_index;
                 query_index[chosen_vars[1]] = axis2_index;
-                let gpd_value = (gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]) - min_gpd) / (max_gpd - min_gpd);
+                let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
                 positions.setZ(i, is2DView ? 0 : gpd_value);
-                let color = evaluate_cmap(gpd_value, currentColormap, false);
+                let color;
+
+                if (useDualColormaps) {
+                    // Normalize the raw value to [-1, 1] range for dual colormap
+                    let normalizedForDual = (gpd_raw_value - (min_gpd + max_gpd) / 2) / ((max_gpd - min_gpd) / 2);
+                    color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
+                } else {
+                    color = evaluate_cmap(gpd_value, currentColormap, false);
+                }
 
                 colors[i * 3] = color[0] / 255.;
                 colors[i * 3 + 1] = color[1] / 255.;
@@ -505,7 +564,9 @@ Promise.all(loadDataFile())
     if (toggleViewBtn) {
         toggleViewBtn.addEventListener('click', function() {
             is2DView = !is2DView;
-            toggleViewBtn.textContent = is2DView ? "🌐 3D View" : "🗺️ 2D Heatmap";
+            toggleViewBtn.innerHTML = is2DView
+                ? '<i class="fas fa-globe me-1"></i>3D View'
+                : '<i class="fas fa-map me-1"></i>2D Heatmap';
             updateSceneInfo(is2DView ? "Switched to 2D heatmap" : "Switched to 3D view");
             
             if (is2DView) {
@@ -544,6 +605,47 @@ Promise.all(loadDataFile())
             showNotification(`Colormap changed to ${currentColormap}`, "info");
             slider_changed = true;
             updateColorbar(min_gpd, max_gpd, currentColormap);
+        });
+    }
+
+    if (dualColormapToggle) {
+        dualColormapToggle.addEventListener('change', function() {
+            useDualColormaps = dualColormapToggle.checked;
+            
+            if (useDualColormaps) {
+                singleColormapControls.style.display = 'none';
+                dualColormapControls.style.display = 'flex';
+                showNotification("Dual colormap mode enabled", "info");
+            } else {
+                singleColormapControls.style.display = 'flex';
+                dualColormapControls.style.display = 'none';
+                showNotification("Single colormap mode enabled", "info");
+            }
+            
+            slider_changed = true;
+            updateColorbar(min_gpd, max_gpd, useDualColormaps ? 'dual' : currentColormap);
+        });
+    }
+
+    if (positiveColormapSelect) {
+        positiveColormapSelect.addEventListener('change', function() {
+            currentPositiveColormap = positiveColormapSelect.value;
+            if (useDualColormaps) {
+                showNotification(`Positive colormap changed to ${currentPositiveColormap}`, "info");
+                slider_changed = true;
+                updateColorbar(min_gpd, max_gpd, 'dual');
+            }
+        });
+    }
+
+    if (negativeColormapSelect) {
+        negativeColormapSelect.addEventListener('change', function() {
+            currentNegativeColormap = negativeColormapSelect.value;
+            if (useDualColormaps) {
+                showNotification(`Negative colormap changed to ${currentNegativeColormap}`, "info");
+                slider_changed = true;
+                updateColorbar(min_gpd, max_gpd, 'dual');
+            }
         });
     }
 
