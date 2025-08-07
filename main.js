@@ -198,11 +198,11 @@ function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag,
 function loadDataFile() {
     const loadingText = document.querySelector('#loading-overlay .loading-text');
     const dataFiles = [
-        { name: "GPD data (gpd_4d.bin)", path: "data/gpd_4d.bin" },
         { name: "x values (x.bin)", path: "data/x.bin" },
         { name: "xi values (xi.bin)", path: "data/xi.bin" },
         { name: "t values (t.bin)", path: "data/t.bin" },
-        { name: "Q² values (Q2.bin)", path: "data/Q2.bin" }
+        { name: "Q² values (Q2.bin)", path: "data/Q2.bin" },
+        { name: "GPD data (gpd_4d.bin)", path: "data/gpd_4d.bin" },
     ];
     
     const results = [];
@@ -217,12 +217,12 @@ function loadDataFile() {
 }
 
 Promise.all(loadDataFile())
-.then(([gpd_4d_flat, x, xi, t, Q2]) => {
-    gpd_4d_flat = new Float64Array(gpd_4d_flat);
+.then(([x, xi, t, Q2, gpd_4d_flat]) => {
     x = new Float64Array(x);
     xi = new Float64Array(xi);
     t = new Float64Array(t);
     Q2 = new Float64Array(Q2);
+    gpd_4d_flat = new Float64Array(gpd_4d_flat);
 
     loading_overlay.style.display = 'none';
     main_content.style.display = 'block';

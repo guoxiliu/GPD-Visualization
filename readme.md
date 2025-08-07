@@ -1,9 +1,15 @@
 Click the [live version link](https://guoxiliu.github.io/GPD-Visualization/) to check the visualization.
 
+Install `git-lfs` (Git Large File Storage) to download the files under the `data/` folder using the `pull` command: 
+```sh
+git-lfs pull origin dev
+```
+
 ### Build and run on local machine
 1. npm install
 2. npx vite
 3. npx build (build the compact version)
+
 
 ### Deploy to GitHub pages:
 1. modify the path to js (add a ".") in index.html
