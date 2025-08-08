@@ -7,7 +7,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { evaluate_cmap } from "./colormap.js"
 
-
+let NUM_SURFACES = 10;
 const axis_labels = [
     'x',
     'x\u1d62', // unicode subscript i
@@ -17,6 +17,8 @@ const axis_labels = [
 let chosen_vars = [1, 3]        // xi, Q2
 let remaining_vars = [0, 2];    // x, t
 let control_index = [0, 0];
+let min_gpd = Number.MAX_VALUE;
+let max_gpd = Number.MIN_VALUE;
 let slider_changed = true;
 let updated_axis = true;
 
@@ -213,23 +215,23 @@ function updateColorbar(min, max, colormap) {
 }
 
 function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag, intervalVar) {
-    // If it's already playing, stop it
+    // stop any existing animation
     if (window[playingFlag]) {
         window[playingFlag] = false;
-        playBtn.textContent = "▶️"; // Play icon
+        playBtn.innerHTML = '<i class="fas fa-play"></i>';
         clearInterval(window[intervalVar]);
         window[intervalVar] = null;
         return;
     }
 
     window[playingFlag] = true;
-    playBtn.textContent = "⏸️";
+    playBtn.innerHTML = '<i class="fas fa-pause"></i>';
 
     window[intervalVar] = setInterval(() => {
         if (!window[playingFlag]) {
             clearInterval(window[intervalVar]);
             window[intervalVar] = null;
-            playBtn.textContent = "▶️";
+            playBtn.innerHTML = '<i class="fas fa-play"></i>';
             return;
         }
 
@@ -242,7 +244,12 @@ function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag,
         slider_changed = true;
         slider.noUiSlider.set(current);
         updateColorbar(min_gpd, max_gpd, useDualColormaps ? 'dual' : currentColormap);
-    }, 100);
+
+        // Show multiple surfaces if multi-surface mode is active
+        if (multiSurfaceActive === idx) {
+            showMultipleSurfaces(idx);
+        }
+    }, 200);
 }
 
 function loadDataFile() {
@@ -283,7 +290,7 @@ Promise.all(loadDataFile())
     var x_xi_t_Q2_array = [x, xi, t, Q2];
     let dims = [x.length, xi.length, t.length, Q2.length];
     let gpd_4d = new ndarray(gpd_4d_flat, dims);
-    let [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
+    [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
     let is2DView = false;
     let camera_3d_state = {};
 
@@ -485,12 +492,17 @@ Promise.all(loadDataFile())
         slider_1.noUiSlider.on('change', function(values, handle) {
             control_index[0] = Number(values[0]);
             slider_changed = true;
+            if (multiSurfaceActive === 0) {
+                showMultipleSurfaces(0);
+            } else {
+                clearMultiSurface();
+            }
         });
         // Stop animation if user interacts with slider manually
         slider_1.noUiSlider.on('start', function() {
             if (window.slider1Playing) {
                 window.slider1Playing = false;
-                playSlider1Btn.textContent = "▶️";
+                playSlider1Btn.innerHTML = '<i class="fas fa-play"></i>';
                 clearInterval(window.slider1Interval);
                 window.slider1Interval = null;
             }
@@ -500,11 +512,16 @@ Promise.all(loadDataFile())
         slider_2.noUiSlider.on('change', function(values, handle) {
             control_index[1] = Number(values[0]);
             slider_changed = true;
+            if (multiSurfaceActive === 1) {
+                showMultipleSurfaces(1);
+            } else {
+                clearMultiSurface();
+            }
         });
         slider_2.noUiSlider.on('start', function() {
             if (window.slider2Playing) {
                 window.slider2Playing = false;
-                playSlider2Btn.textContent = "▶️";
+                playSlider2Btn.innerHTML = '<i class="fas fa-play"></i>';
                 clearInterval(window.slider2Interval);
                 window.slider2Interval = null;
             }
@@ -521,6 +538,127 @@ Promise.all(loadDataFile())
             animateSlider(slider_2, arrays2[1], control_index, 1, playSlider2Btn, 'slider2Playing', 'slider2Interval');
         });
     }
+
+    const multiSurface1Btn = document.getElementById('multi-surface1');
+    const multiSurface2Btn = document.getElementById('multi-surface2');
+    let multiSurfaceActive = null; // null, 0, or 1
+
+    // Helper to stop any animation
+    function stopAllAnimations() {
+        if (window.slider1Playing) {
+            window.slider1Playing = false;
+            playSlider1Btn.innerHTML = '<i class="fas fa-play"></i>';
+            clearInterval(window.slider1Interval);
+            window.slider1Interval = null;
+        }
+        if (window.slider2Playing) {
+            window.slider2Playing = false;
+            playSlider2Btn.innerHTML = '<i class="fas fa-play"></i>';
+            clearInterval(window.slider2Interval);
+            window.slider2Interval = null;
+        }
+    }
+
+    function showMultipleSurfaces(idx) {
+        stopAllAnimations();
+        multiSurfaceActive = idx;
+        // Toggle button styles
+        if (multiSurface1Btn) {
+            multiSurface1Btn.classList.toggle('btn-secondary', idx === 0);
+            multiSurface1Btn.classList.toggle('btn-outline-secondary', idx !== 0);
+        }
+        if (multiSurface2Btn) {
+            multiSurface2Btn.classList.toggle('btn-secondary', idx === 1);
+            multiSurface2Btn.classList.toggle('btn-outline-secondary', idx !== 1);
+        }
+        const offset = -5;
+        const centerIdx = control_index[idx];
+        const maxDistance = Math.floor(NUM_SURFACES / 2);
+        const surfaces = [];
+        for (let i = 0; i < NUM_SURFACES; i++) {
+            let surfaceIdx = centerIdx + offset + i;
+            // Clamp to valid range
+            const arrLen = idx === 0 ? arrays2[0].length : arrays2[1].length;
+            if (surfaceIdx < 0 || surfaceIdx >= arrLen) continue;
+            // Opacity decreases with distance from center
+            const distance = Math.abs(surfaceIdx - centerIdx);
+            let opacity = 1 - (distance / maxDistance);
+            opacity = Math.max(0.1, opacity);
+
+            let surfaceGeometry = geometry.clone();
+            let surfaceMaterial = material.clone();
+            surfaceMaterial.transparent = true;
+            surfaceMaterial.opacity = opacity;
+            let surfacePositions = surfaceGeometry.attributes.position;
+            let surfaceColors = new Float32Array(surfacePositions.count * 3);
+            for (let j = 0; j < surfacePositions.count; j++) {
+                let axis2_index = Math.floor(j / arrays1[0].length);
+                let axis1_index = j % arrays1[0].length;
+                let query_index = [0, 0, 0, 0];
+                query_index[remaining_vars[0]] = idx === 0 ? surfaceIdx : control_index[0];
+                query_index[remaining_vars[1]] = idx === 1 ? surfaceIdx : control_index[1];
+                query_index[chosen_vars[0]] = axis1_index;
+                query_index[chosen_vars[1]] = axis2_index;
+                let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
+                surfacePositions.setZ(j, is2DView ? 0 : gpd_value);
+                let color;
+                if (useDualColormaps) {
+                    color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
+                } else {
+                    color = evaluate_cmap(gpd_value, currentColormap, false);
+                }
+                surfaceColors[j * 3] = color[0] / 255.;
+                surfaceColors[j * 3 + 1] = color[1] / 255.;
+                surfaceColors[j * 3 + 2] = color[2] / 255.;
+            }
+            surfaceGeometry.setAttribute('color', new THREE.BufferAttribute(surfaceColors, 3));
+            surfacePositions.needsUpdate = true;
+            surfaceGeometry.computeVertexNormals();
+            let mesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+            surfaces.push(mesh);
+        }
+        // Remove previous multi-surfaces from scene
+        if (scene.__multiSurfaces) {
+            scene.__multiSurfaces.forEach(m => scene.remove(m));
+        }
+        // Add new ones
+        surfaces.forEach(m => scene.add(m));
+        scene.__multiSurfaces = surfaces;
+        renderer.render(scene, camera);
+    }
+
+    function clearMultiSurface() {
+        multiSurfaceActive = null;
+        if (multiSurface1Btn) {
+            multiSurface1Btn.classList.remove('btn-secondary');
+            multiSurface1Btn.classList.add('btn-outline-secondary');
+        }
+        if (multiSurface2Btn) {
+            multiSurface2Btn.classList.remove('btn-secondary');
+            multiSurface2Btn.classList.add('btn-outline-secondary');
+        }
+        if (scene && scene.__multiSurfaces) {
+            scene.__multiSurfaces.forEach(m => scene.remove(m));
+            scene.__multiSurfaces = [];
+            renderer.render(scene, camera);
+        }
+    }
+
+    multiSurface1Btn.addEventListener('click', function() {
+        if (multiSurfaceActive === 0) {
+            clearMultiSurface();
+        } else {
+            showMultipleSurfaces(0);
+        }
+    });
+    multiSurface2Btn.addEventListener('click', function() {
+        if (multiSurfaceActive === 1) {
+            clearMultiSurface();
+        } else {
+            showMultipleSurfaces(1);
+        }
+    });
 
     if (dropdown1) {
         dropdown1.addEventListener('change', function() {
@@ -667,6 +805,19 @@ Promise.all(loadDataFile())
             resetView();
         }
     });
+
+    const numSurfacesInput = document.getElementById('num-surfaces-input');
+    if (numSurfacesInput) {
+        numSurfacesInput.addEventListener('change', function() {
+            let val = parseInt(numSurfacesInput.value, 10);
+            if (isNaN(val) || val < 1) val = 1;
+            if (val > 50) val = 50;
+            NUM_SURFACES = val;
+            numSurfacesInput.value = val;
+            if (multiSurfaceActive === 0) showMultipleSurfaces(0);
+            if (multiSurfaceActive === 1) showMultipleSurfaces(1);
+        });
+    }
 
 })
 .catch(error => {
