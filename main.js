@@ -17,11 +17,19 @@ const axis_labels = [
 let chosen_vars = [1, 3]        // xi, Q2
 let remaining_vars = [0, 2];    // x, t
 let control_index = [0, 0];
+let dataFiles = [
+    { name: "x values (x.bin)", path: "data/x.bin", key: 'x' },
+    { name: "xi values (xi.bin)", path: "data/xi.bin", key: 'xi' },
+    { name: "t values (t.bin)", path: "data/t.bin", key: 't' },
+    { name: "Q² values (Q2.bin)", path: "data/Q2.bin", key: 'Q2' },
+    { name: "GPD data (gpd_4d.bin)", path: "data/gpd_4d.bin", key: 'gpd_4d' },
+];
 let min_gpd = Number.MAX_VALUE;
 let max_gpd = Number.MIN_VALUE;
 let slider_changed = true;
 let updated_axis = true;
 
+let upload_overlay = document.getElementById('data-upload-overlay');
 let loading_overlay = document.getElementById('loading-overlay');
 let main_content = document.getElementById('main-content');
 
@@ -113,6 +121,30 @@ function load_array(url) {
         }
         return response.arrayBuffer();
     });
+}
+
+function load_data_files() {
+    const loadingText = document.querySelector('#loading-overlay .loading-text');
+    // If user uploaded files, use them
+    if (userDataPaths) {
+        const results = [];
+        for (const file of dataFiles) {
+            if (loadingText) {
+                loadingText.textContent = `Loading ${file.name}...`;
+            }
+            results.push(load_array(userDataPaths[file.key]));
+        }
+        return results;
+    }
+    // Otherwise, use default files (return array of Promises)
+    const results = [];
+    for (const file of dataFiles) {
+        if (loadingText) {
+            loadingText.textContent = `Loading ${file.name}...`;
+        }
+        results.push(load_array(file.path));
+    }
+    return results;
 }
 
 // Notification system
@@ -214,7 +246,7 @@ function updateColorbar(min, max, colormap) {
     }
 }
 
-function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag, intervalVar) {
+function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar) {
     // stop any existing animation
     if (window[playingFlag]) {
         window[playingFlag] = false;
@@ -252,587 +284,614 @@ function animateSlider(slider, dataArray, controlIdx, idx, playBtn, playingFlag,
     }, 200);
 }
 
-function loadDataFile() {
-    const loadingText = document.querySelector('#loading-overlay .loading-text');
-    const dataFiles = [
-        { name: "x values (x.bin)", path: "data/x.bin" },
-        { name: "xi values (xi.bin)", path: "data/xi.bin" },
-        { name: "t values (t.bin)", path: "data/t.bin" },
-        { name: "Q² values (Q2.bin)", path: "data/Q2.bin" },
-        { name: "GPD data (gpd_4d.bin)", path: "data/gpd_4d.bin" },
-    ];
-    
-    const results = [];
-    for (const file of dataFiles) {
-        if (loadingText) {
-            loadingText.textContent = `Loading ${file.name}...`;
-        }
-        const dataArray = load_array(file.path);
-        results.push(dataArray);
-    }
-    return results;
+// --- Data Upload Handling ---
+let userDataPaths = null;
+
+function readFileAsArrayBuffer(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+    });
 }
 
-Promise.all(loadDataFile())
-.then(([x, xi, t, Q2, gpd_4d_flat]) => {
-    x = new Float64Array(x);
-    xi = new Float64Array(xi);
-    t = new Float64Array(t);
-    Q2 = new Float64Array(Q2);
-    gpd_4d_flat = new Float64Array(gpd_4d_flat);
+window.addEventListener('DOMContentLoaded', () => {
+    const upload_form = document.getElementById('data-upload-form');
+    const skipBtn = document.getElementById('skip-upload-btn');
 
-    loading_overlay.style.display = 'none';
-    main_content.style.display = 'block';
-    dropdown1.value = chosen_vars[0];
-    dropdown2.value = chosen_vars[1];
-    colormapSelect.value = currentColormap;
+    skipBtn.addEventListener('click', () => {
+        userDataPaths = null;
+        upload_overlay.style.display = 'none';
+        gpd_vis();
+    });
+
+    upload_form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        upload_overlay.style.display = 'none';
+        const xFile = document.getElementById('file-x').files[0];
+        const xiFile = document.getElementById('file-xi').files[0];
+        const tFile = document.getElementById('file-t').files[0];
+        const Q2File = document.getElementById('file-Q2').files[0];
+        const gpd4dFile = document.getElementById('file-gpd4d').files[0];
+        if (!(xFile && xiFile && tFile && Q2File && gpd4dFile)) {
+            alert('Please select all required files.');
+            return;
+        }
+        userDataPaths = {
+            x: URL.createObjectURL(xFile),
+            xi: URL.createObjectURL(xiFile),
+            t: URL.createObjectURL(tFile),
+            Q2: URL.createObjectURL(Q2File),
+            gpd_4d: URL.createObjectURL(gpd4dFile)
+        };
+        gpd_vis();
+    });
+});
+
+function gpd_vis() {
+    Promise.all(load_data_files())
+    .then(([x, xi, t, Q2, gpd_4d_flat]) => {
+        // If user uploaded, these are ArrayBuffers, else they are arrays from load_array
+        x = new Float64Array(x);
+        xi = new Float64Array(xi);
+        t = new Float64Array(t);
+        Q2 = new Float64Array(Q2);
+        gpd_4d_flat = new Float64Array(gpd_4d_flat);
     
-    var x_xi_t_Q2_array = [x, xi, t, Q2];
-    let dims = [x.length, xi.length, t.length, Q2.length];
-    let gpd_4d = new ndarray(gpd_4d_flat, dims);
-    [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
-    let is2DView = false;
-    let camera_3d_state = {};
-
-    console.log("min_gpd:", min_gpd, "max_gpd:", max_gpd);
-
-    // After you set min_gpd and max_gpd in your .then() block, update the colorbar labels:
-    document.querySelectorAll('.colorbar-labels')[0].textContent = `${max_gpd.toFixed(3)}`;
-    document.querySelectorAll('.colorbar-labels')[1].textContent = `${min_gpd.toFixed(3)}`;
-
-    let container = document.getElementById("three-container")
-    let camera = new THREE.PerspectiveCamera(75, container.clientWidth /  container.clientHeight, 0.1, 1000);
-    camera.position.set(0.345, -0.597, 0.970);
-    camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
-
-    let renderer = new THREE.WebGLRenderer({antialias:true});
-    renderer.setClearColor(.1, .1, .1) 
-    renderer.setSize( container.clientWidth, container.clientHeight );
-    container.appendChild(renderer.domElement)
-
-    let controls = new TrackballControls(camera, renderer.domElement);
-    controls.rotateSpeed = 3.0;
-    controls.zoomSpeed = 1.0;
-
-    let min_axis1, max_axis1, min_axis2, max_axis2;
-    let arrays1 = [[], []];
-    let arrays2 = [[], []];
-    let scene;
-    let positions;
-    let colors;
-    let axis_scene;
-    let geometry;
-
-    let material = new THREE.MeshStandardMaterial({
-        vertexColors: true,    
-        side: THREE.DoubleSide,
-        metalness: 0.1,
-        roughness: 0.5
-    });
-    let ambient_light = new THREE.AmbientLight(0xffffff, 0.1);
-    let dir_light = new THREE.DirectionalLight(0xffffff, 2);
-    dir_light.position.set(1, 1, 1);
-    dir_light.castShadow = true;
-
-    let axis_camera = new THREE.OrthographicCamera(-2, 2, 2, -2, -1000, 1000);
-
-    function animate() {
-        if (updated_axis) {
-            updated_axis = false;
-
-            arrays1 = [x_xi_t_Q2_array[chosen_vars[0]], x_xi_t_Q2_array[chosen_vars[1]]];   // axes
-            arrays2 = [x_xi_t_Q2_array[remaining_vars[0]], x_xi_t_Q2_array[remaining_vars[1]]]; // sliders
-
-            [min_axis1, max_axis1] = get_extreme(arrays1[0]);
-            [min_axis2, max_axis2] = get_extreme(arrays1[1]);
-
-            slider_1.noUiSlider.updateOptions({
-                range: {
-                    min: 0,
-                    max: arrays2[0].length - 1
-                },
-                tooltips: { 
-                    to: function (value) { return arrays2[0][Math.round(value)]; } 
-                },
-            });
-
-            slider_2.noUiSlider.updateOptions({
-                range: {
-                    min: 0,
-                    max: arrays2[1].length - 1
-                },
-                tooltips: { 
-                    to: function (value) { return arrays2[1][Math.round(value)]; } 
-                },
-            });
-
-            scene = new THREE.Scene();
-            geometry = new THREE.PlaneGeometry(1, 1, arrays1[0].length - 1, arrays1[1].length - 1);
-            let plane = new THREE.Mesh(geometry, material);
-            let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
-            global_axis.forEach(element => { scene.add(element); });
-            scene.add(plane);
-            scene.add(dir_light);
-            scene.add(ambient_light);
-
-            axis_scene = new THREE.Scene();
-            let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
-            orient_axis.forEach(element => { axis_scene.add(element); });
-
-            positions = geometry.attributes.position;
-            colors = new Float32Array(positions.count * 3);
-            for (let i = 0; i < positions.count; i++) {
-                let axis2_index = Math.floor(i / arrays1[0].length);
-                let axis1_index = i % arrays1[0].length;
-                let axis1_value = (arrays1[0][axis1_index] - min_axis1) / (max_axis1 - min_axis1);
-                let axis2_value = (arrays1[1][axis2_index] - min_axis2) / (max_axis2 - min_axis2);
-                positions.setX(i, axis1_value);
-                positions.setY(i, axis2_value);
-            }
-            controls.target.set(0.5, 0.5, 0.5);
-            controls.update();
-        }
-
-        if (slider_changed) {
-            slider_changed = false;
-            for (let i = 0; i < positions.count; i++) {
-                let axis2_index = Math.floor(i / arrays1[0].length);
-                let axis1_index = i % arrays1[0].length;
-                let query_index = [0, 0, 0, 0];
-                query_index[remaining_vars[0]] = control_index[0];
-                query_index[remaining_vars[1]] = control_index[1];
-                query_index[chosen_vars[0]] = axis1_index;
-                query_index[chosen_vars[1]] = axis2_index;
-                let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
-                let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
-                positions.setZ(i, is2DView ? 0 : gpd_value);
-                let color;
-
-                if (useDualColormaps) {
-                    // Normalize the raw value to [-1, 1] range for dual colormap
-                    let normalizedForDual = (gpd_raw_value - (min_gpd + max_gpd) / 2) / ((max_gpd - min_gpd) / 2);
-                    color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
-                } else {
-                    color = evaluate_cmap(gpd_value, currentColormap, false);
-                }
-
-                colors[i * 3] = color[0] / 255.;
-                colors[i * 3 + 1] = color[1] / 255.;
-                colors[i * 3 + 2] = color[2] / 255.;
-            }
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            positions.needsUpdate = true;
-            geometry.computeVertexNormals();
-        }
-
-        renderer.setViewport(0, 0, container.clientWidth, container.clientHeight);
-        controls.update();
-        renderer.clear();
-        renderer.render(scene, camera);
-
-        axis_camera.quaternion.copy(camera.quaternion);
-
-        renderer.clearDepth();  
-        renderer.autoClear = false;
-        renderer.setViewport(0, 0, 300, 300);
-        renderer.render(axis_scene, axis_camera);
-    }
-    renderer.setAnimationLoop( animate );
-
-    noUiSlider.create(slider_1, {
-        start: [0],  
-        tooltips: { 
-            to: function (value) { return arrays2[0][Math.round(value)]; } 
-        },
-        step: 1,
-        range: {
-            min: 0,
-            max: arrays2[0].length - 1
-        },
-    });
-
-    noUiSlider.create(slider_2, {
-        start: [0], 
-        tooltips: { 
-            to: function (value) { return arrays2[0][Math.round(value)]; } 
-        },
-        step: 1,
-        range: {
-            min: 0,
-            max: arrays2[1].length - 1
-        },
-    });
-
-    updateSliderLabels();
-    updateColorbar(min_gpd, max_gpd, currentColormap);
-    updateSceneInfo('Scene ready');
-
-    function resetView() {
-        // Reset main camera
+        loading_overlay.style.display = 'none';
+        main_content.style.display = 'block';
+        dropdown1.value = chosen_vars[0];
+        dropdown2.value = chosen_vars[1];
+        colormapSelect.value = currentColormap;
+        
+        var x_xi_t_Q2_array = [x, xi, t, Q2];
+        let dims = [x.length, xi.length, t.length, Q2.length];
+        let gpd_4d = new ndarray(gpd_4d_flat, dims);
+        [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
+        let is2DView = false;
+        let camera_3d_state = {};
+    
+        console.log("min_gpd:", min_gpd, "max_gpd:", max_gpd);
+    
+        // After you set min_gpd and max_gpd in your .then() block, update the colorbar labels:
+        document.querySelectorAll('.colorbar-labels')[0].textContent = `${max_gpd.toFixed(3)}`;
+        document.querySelectorAll('.colorbar-labels')[1].textContent = `${min_gpd.toFixed(3)}`;
+    
+        let container = document.getElementById("three-container")
+        let camera = new THREE.PerspectiveCamera(75, container.clientWidth /  container.clientHeight, 0.1, 1000);
         camera.position.set(0.345, -0.597, 0.970);
         camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
-        controls.target.set(0.5, 0.5, 0.5);
-        controls.update();
-        
-        // Reset axis camera to default orthographic settings
-        axis_camera.left = -2;
-        axis_camera.right = 2;
-        axis_camera.top = 2;
-        axis_camera.bottom = -2;
-        axis_camera.near = -1000;
-        axis_camera.far = 1000;
-        axis_camera.zoom = 1;
-        axis_camera.updateProjectionMatrix();
-        
-        updateSceneInfo('View reset to default');
-    }
-
-    /* Add event listeners below */
-    if (slider_1) {
-        slider_1.noUiSlider.on('change', function(values, handle) {
-            control_index[0] = Number(values[0]);
-            slider_changed = true;
-            if (multiSurfaceActive === 0) {
-                showMultipleSurfaces(0);
-            } else {
-                clearMultiSurface();
-            }
+    
+        let renderer = new THREE.WebGLRenderer({antialias:true});
+        renderer.setClearColor(.1, .1, .1) 
+        renderer.setSize( container.clientWidth, container.clientHeight );
+        container.appendChild(renderer.domElement)
+    
+        let controls = new TrackballControls(camera, renderer.domElement);
+        controls.rotateSpeed = 3.0;
+        controls.zoomSpeed = 1.0;
+    
+        let min_axis1, max_axis1, min_axis2, max_axis2;
+        let arrays1 = [[], []];
+        let arrays2 = [[], []];
+        let scene;
+        let positions;
+        let colors;
+        let axis_scene;
+        let geometry;
+    
+        let material = new THREE.MeshStandardMaterial({
+            vertexColors: true,    
+            side: THREE.DoubleSide,
+            metalness: 0.1,
+            roughness: 0.5
         });
-        // Stop animation if user interacts with slider manually
-        slider_1.noUiSlider.on('start', function() {
+        let ambient_light = new THREE.AmbientLight(0xffffff, 0.1);
+        let dir_light = new THREE.DirectionalLight(0xffffff, 2);
+        dir_light.position.set(1, 1, 1);
+        dir_light.castShadow = true;
+    
+        let axis_camera = new THREE.OrthographicCamera(-2, 2, 2, -2, -1000, 1000);
+    
+        function animate() {
+            if (updated_axis) {
+                updated_axis = false;
+    
+                arrays1 = [x_xi_t_Q2_array[chosen_vars[0]], x_xi_t_Q2_array[chosen_vars[1]]];   // axes
+                arrays2 = [x_xi_t_Q2_array[remaining_vars[0]], x_xi_t_Q2_array[remaining_vars[1]]]; // sliders
+    
+                [min_axis1, max_axis1] = get_extreme(arrays1[0]);
+                [min_axis2, max_axis2] = get_extreme(arrays1[1]);
+    
+                slider_1.noUiSlider.updateOptions({
+                    range: {
+                        min: 0,
+                        max: arrays2[0].length - 1
+                    },
+                    tooltips: { 
+                        to: function (value) { return arrays2[0][Math.round(value)]; } 
+                    },
+                });
+    
+                slider_2.noUiSlider.updateOptions({
+                    range: {
+                        min: 0,
+                        max: arrays2[1].length - 1
+                    },
+                    tooltips: { 
+                        to: function (value) { return arrays2[1][Math.round(value)]; } 
+                    },
+                });
+    
+                scene = new THREE.Scene();
+                geometry = new THREE.PlaneGeometry(1, 1, arrays1[0].length - 1, arrays1[1].length - 1);
+                let plane = new THREE.Mesh(geometry, material);
+                let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+                global_axis.forEach(element => { scene.add(element); });
+                scene.add(plane);
+                scene.add(dir_light);
+                scene.add(ambient_light);
+    
+                axis_scene = new THREE.Scene();
+                let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+                orient_axis.forEach(element => { axis_scene.add(element); });
+    
+                positions = geometry.attributes.position;
+                colors = new Float32Array(positions.count * 3);
+                for (let i = 0; i < positions.count; i++) {
+                    let axis2_index = Math.floor(i / arrays1[0].length);
+                    let axis1_index = i % arrays1[0].length;
+                    let axis1_value = (arrays1[0][axis1_index] - min_axis1) / (max_axis1 - min_axis1);
+                    let axis2_value = (arrays1[1][axis2_index] - min_axis2) / (max_axis2 - min_axis2);
+                    positions.setX(i, axis1_value);
+                    positions.setY(i, axis2_value);
+                }
+                controls.target.set(0.5, 0.5, 0.5);
+                controls.update();
+            }
+    
+            if (slider_changed) {
+                slider_changed = false;
+                for (let i = 0; i < positions.count; i++) {
+                    let axis2_index = Math.floor(i / arrays1[0].length);
+                    let axis1_index = i % arrays1[0].length;
+                    let query_index = [0, 0, 0, 0];
+                    query_index[remaining_vars[0]] = control_index[0];
+                    query_index[remaining_vars[1]] = control_index[1];
+                    query_index[chosen_vars[0]] = axis1_index;
+                    query_index[chosen_vars[1]] = axis2_index;
+                    let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                    let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
+                    positions.setZ(i, is2DView ? 0 : gpd_value);
+                    let color;
+    
+                    if (useDualColormaps) {
+                        // Normalize the raw value to [-1, 1] range for dual colormap
+                        let normalizedForDual = (gpd_raw_value - (min_gpd + max_gpd) / 2) / ((max_gpd - min_gpd) / 2);
+                        color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
+                    } else {
+                        color = evaluate_cmap(gpd_value, currentColormap, false);
+                    }
+    
+                    colors[i * 3] = color[0] / 255.;
+                    colors[i * 3 + 1] = color[1] / 255.;
+                    colors[i * 3 + 2] = color[2] / 255.;
+                }
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                positions.needsUpdate = true;
+                geometry.computeVertexNormals();
+            }
+    
+            renderer.setViewport(0, 0, container.clientWidth, container.clientHeight);
+            controls.update();
+            renderer.clear();
+            renderer.render(scene, camera);
+    
+            axis_camera.quaternion.copy(camera.quaternion);
+    
+            renderer.clearDepth();  
+            renderer.autoClear = false;
+            renderer.setViewport(0, 0, 300, 300);
+            renderer.render(axis_scene, axis_camera);
+        }
+        renderer.setAnimationLoop( animate );
+    
+        noUiSlider.create(slider_1, {
+            start: [0],  
+            tooltips: { 
+                to: function (value) { return arrays2[0][Math.round(value)]; } 
+            },
+            step: 1,
+            range: {
+                min: 0,
+                max: arrays2[0].length - 1
+            },
+        });
+    
+        noUiSlider.create(slider_2, {
+            start: [0], 
+            tooltips: { 
+                to: function (value) { return arrays2[0][Math.round(value)]; } 
+            },
+            step: 1,
+            range: {
+                min: 0,
+                max: arrays2[1].length - 1
+            },
+        });
+    
+        updateSliderLabels();
+        updateColorbar(min_gpd, max_gpd, currentColormap);
+        updateSceneInfo('Scene ready');
+    
+        function resetView() {
+            // Reset main camera
+            camera.position.set(0.345, -0.597, 0.970);
+            camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
+            controls.target.set(0.5, 0.5, 0.5);
+            controls.update();
+            
+            // Reset axis camera to default orthographic settings
+            axis_camera.left = -2;
+            axis_camera.right = 2;
+            axis_camera.top = 2;
+            axis_camera.bottom = -2;
+            axis_camera.near = -1000;
+            axis_camera.far = 1000;
+            axis_camera.zoom = 1;
+            axis_camera.updateProjectionMatrix();
+            
+            updateSceneInfo('View reset to default');
+        }
+    
+        /* Add event listeners below */
+        if (slider_1) {
+            slider_1.noUiSlider.on('change', function(values, handle) {
+                control_index[0] = Number(values[0]);
+                slider_changed = true;
+                if (multiSurfaceActive === 0) {
+                    showMultipleSurfaces(0);
+                } else {
+                    clearMultiSurface();
+                }
+            });
+            // Stop animation if user interacts with slider manually
+            slider_1.noUiSlider.on('start', function() {
+                if (window.slider1Playing) {
+                    window.slider1Playing = false;
+                    playSlider1Btn.innerHTML = '<i class="fas fa-play"></i>';
+                    clearInterval(window.slider1Interval);
+                    window.slider1Interval = null;
+                }
+            });
+        }
+        if (slider_2) {
+            slider_2.noUiSlider.on('change', function(values, handle) {
+                control_index[1] = Number(values[0]);
+                slider_changed = true;
+                if (multiSurfaceActive === 1) {
+                    showMultipleSurfaces(1);
+                } else {
+                    clearMultiSurface();
+                }
+            });
+            slider_2.noUiSlider.on('start', function() {
+                if (window.slider2Playing) {
+                    window.slider2Playing = false;
+                    playSlider2Btn.innerHTML = '<i class="fas fa-play"></i>';
+                    clearInterval(window.slider2Interval);
+                    window.slider2Interval = null;
+                }
+            });
+        }
+    
+        if (playSlider1Btn) {
+            playSlider1Btn.addEventListener('click', function() {
+                animateSlider(slider_1, arrays2[0], 0, playSlider1Btn, 'slider1Playing', 'slider1Interval');
+            });
+        }
+        if (playSlider2Btn) {
+            playSlider2Btn.addEventListener('click', function() {
+                animateSlider(slider_2, arrays2[1], 1, playSlider2Btn, 'slider2Playing', 'slider2Interval');
+            });
+        }
+    
+        const multiSurface1Btn = document.getElementById('multi-surface1');
+        const multiSurface2Btn = document.getElementById('multi-surface2');
+        let multiSurfaceActive = null; // null, 0, or 1
+    
+        // Helper to stop any animation
+        function stopAllAnimations() {
             if (window.slider1Playing) {
                 window.slider1Playing = false;
                 playSlider1Btn.innerHTML = '<i class="fas fa-play"></i>';
                 clearInterval(window.slider1Interval);
                 window.slider1Interval = null;
             }
-        });
-    }
-    if (slider_2) {
-        slider_2.noUiSlider.on('change', function(values, handle) {
-            control_index[1] = Number(values[0]);
-            slider_changed = true;
-            if (multiSurfaceActive === 1) {
-                showMultipleSurfaces(1);
-            } else {
-                clearMultiSurface();
-            }
-        });
-        slider_2.noUiSlider.on('start', function() {
             if (window.slider2Playing) {
                 window.slider2Playing = false;
                 playSlider2Btn.innerHTML = '<i class="fas fa-play"></i>';
                 clearInterval(window.slider2Interval);
                 window.slider2Interval = null;
             }
-        });
-    }
-
-    if (playSlider1Btn) {
-        playSlider1Btn.addEventListener('click', function() {
-            animateSlider(slider_1, arrays2[0], control_index, 0, playSlider1Btn, 'slider1Playing', 'slider1Interval');
-        });
-    }
-    if (playSlider2Btn) {
-        playSlider2Btn.addEventListener('click', function() {
-            animateSlider(slider_2, arrays2[1], control_index, 1, playSlider2Btn, 'slider2Playing', 'slider2Interval');
-        });
-    }
-
-    const multiSurface1Btn = document.getElementById('multi-surface1');
-    const multiSurface2Btn = document.getElementById('multi-surface2');
-    let multiSurfaceActive = null; // null, 0, or 1
-
-    // Helper to stop any animation
-    function stopAllAnimations() {
-        if (window.slider1Playing) {
-            window.slider1Playing = false;
-            playSlider1Btn.innerHTML = '<i class="fas fa-play"></i>';
-            clearInterval(window.slider1Interval);
-            window.slider1Interval = null;
         }
-        if (window.slider2Playing) {
-            window.slider2Playing = false;
-            playSlider2Btn.innerHTML = '<i class="fas fa-play"></i>';
-            clearInterval(window.slider2Interval);
-            window.slider2Interval = null;
-        }
-    }
-
-    function showMultipleSurfaces(idx) {
-        stopAllAnimations();
-        multiSurfaceActive = idx;
-        // Toggle button styles
-        if (multiSurface1Btn) {
-            multiSurface1Btn.classList.toggle('btn-secondary', idx === 0);
-            multiSurface1Btn.classList.toggle('btn-outline-secondary', idx !== 0);
-        }
-        if (multiSurface2Btn) {
-            multiSurface2Btn.classList.toggle('btn-secondary', idx === 1);
-            multiSurface2Btn.classList.toggle('btn-outline-secondary', idx !== 1);
-        }
-        const offset = -5;
-        const centerIdx = control_index[idx];
-        const maxDistance = Math.floor(NUM_SURFACES / 2);
-        const surfaces = [];
-        for (let i = 0; i < NUM_SURFACES; i++) {
-            let surfaceIdx = centerIdx + offset + i;
-            // Clamp to valid range
-            const arrLen = idx === 0 ? arrays2[0].length : arrays2[1].length;
-            if (surfaceIdx < 0 || surfaceIdx >= arrLen) continue;
-            // Opacity decreases with distance from center
-            const distance = Math.abs(surfaceIdx - centerIdx);
-            let opacity = 1 - (distance / maxDistance);
-            opacity = Math.max(0.1, opacity);
-
-            let surfaceGeometry = geometry.clone();
-            let surfaceMaterial = material.clone();
-            surfaceMaterial.transparent = true;
-            surfaceMaterial.opacity = opacity;
-            let surfacePositions = surfaceGeometry.attributes.position;
-            let surfaceColors = new Float32Array(surfacePositions.count * 3);
-            for (let j = 0; j < surfacePositions.count; j++) {
-                let axis2_index = Math.floor(j / arrays1[0].length);
-                let axis1_index = j % arrays1[0].length;
-                let query_index = [0, 0, 0, 0];
-                query_index[remaining_vars[0]] = idx === 0 ? surfaceIdx : control_index[0];
-                query_index[remaining_vars[1]] = idx === 1 ? surfaceIdx : control_index[1];
-                query_index[chosen_vars[0]] = axis1_index;
-                query_index[chosen_vars[1]] = axis2_index;
-                let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
-                let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
-                surfacePositions.setZ(j, is2DView ? 0 : gpd_value);
-                let color;
-                if (useDualColormaps) {
-                    color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
-                } else {
-                    color = evaluate_cmap(gpd_value, currentColormap, false);
-                }
-                surfaceColors[j * 3] = color[0] / 255.;
-                surfaceColors[j * 3 + 1] = color[1] / 255.;
-                surfaceColors[j * 3 + 2] = color[2] / 255.;
+    
+        function showMultipleSurfaces(idx) {
+            stopAllAnimations();
+            multiSurfaceActive = idx;
+            // Toggle button styles
+            if (multiSurface1Btn) {
+                multiSurface1Btn.classList.toggle('btn-secondary', idx === 0);
+                multiSurface1Btn.classList.toggle('btn-outline-secondary', idx !== 0);
             }
-            surfaceGeometry.setAttribute('color', new THREE.BufferAttribute(surfaceColors, 3));
-            surfacePositions.needsUpdate = true;
-            surfaceGeometry.computeVertexNormals();
-            let mesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
-            surfaces.push(mesh);
-        }
-        // Remove previous multi-surfaces from scene
-        if (scene.__multiSurfaces) {
-            scene.__multiSurfaces.forEach(m => scene.remove(m));
-        }
-        // Add new ones
-        surfaces.forEach(m => scene.add(m));
-        scene.__multiSurfaces = surfaces;
-        renderer.render(scene, camera);
-    }
-
-    function clearMultiSurface() {
-        multiSurfaceActive = null;
-        if (multiSurface1Btn) {
-            multiSurface1Btn.classList.remove('btn-secondary');
-            multiSurface1Btn.classList.add('btn-outline-secondary');
-        }
-        if (multiSurface2Btn) {
-            multiSurface2Btn.classList.remove('btn-secondary');
-            multiSurface2Btn.classList.add('btn-outline-secondary');
-        }
-        if (scene && scene.__multiSurfaces) {
-            scene.__multiSurfaces.forEach(m => scene.remove(m));
-            scene.__multiSurfaces = [];
+            if (multiSurface2Btn) {
+                multiSurface2Btn.classList.toggle('btn-secondary', idx === 1);
+                multiSurface2Btn.classList.toggle('btn-outline-secondary', idx !== 1);
+            }
+            const offset = -5;
+            const centerIdx = control_index[idx];
+            const maxDistance = Math.floor(NUM_SURFACES / 2);
+            const surfaces = [];
+            for (let i = 0; i < NUM_SURFACES; i++) {
+                let surfaceIdx = centerIdx + offset + i;
+                // Clamp to valid range
+                const arrLen = idx === 0 ? arrays2[0].length : arrays2[1].length;
+                if (surfaceIdx < 0 || surfaceIdx >= arrLen) continue;
+                // Opacity decreases with distance from center
+                const distance = Math.abs(surfaceIdx - centerIdx);
+                let opacity = 1 - (distance / maxDistance);
+                opacity = Math.max(0.1, opacity);
+    
+                let surfaceGeometry = geometry.clone();
+                let surfaceMaterial = material.clone();
+                surfaceMaterial.transparent = true;
+                surfaceMaterial.opacity = opacity;
+                let surfacePositions = surfaceGeometry.attributes.position;
+                let surfaceColors = new Float32Array(surfacePositions.count * 3);
+                for (let j = 0; j < surfacePositions.count; j++) {
+                    let axis2_index = Math.floor(j / arrays1[0].length);
+                    let axis1_index = j % arrays1[0].length;
+                    let query_index = [0, 0, 0, 0];
+                    query_index[remaining_vars[0]] = idx === 0 ? surfaceIdx : control_index[0];
+                    query_index[remaining_vars[1]] = idx === 1 ? surfaceIdx : control_index[1];
+                    query_index[chosen_vars[0]] = axis1_index;
+                    query_index[chosen_vars[1]] = axis2_index;
+                    let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                    let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
+                    surfacePositions.setZ(j, is2DView ? 0 : gpd_value);
+                    let color;
+                    if (useDualColormaps) {
+                        color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
+                    } else {
+                        color = evaluate_cmap(gpd_value, currentColormap, false);
+                    }
+                    surfaceColors[j * 3] = color[0] / 255.;
+                    surfaceColors[j * 3 + 1] = color[1] / 255.;
+                    surfaceColors[j * 3 + 2] = color[2] / 255.;
+                }
+                surfaceGeometry.setAttribute('color', new THREE.BufferAttribute(surfaceColors, 3));
+                surfacePositions.needsUpdate = true;
+                surfaceGeometry.computeVertexNormals();
+                let mesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+                surfaces.push(mesh);
+            }
+            // Remove previous multi-surface from scene
+            if (scene.__multiSurfaces) {
+                scene.__multiSurfaces.forEach(m => scene.remove(m));
+            }
+            // Add new ones
+            surfaces.forEach(m => scene.add(m));
+            scene.__multiSurfaces = surfaces;
             renderer.render(scene, camera);
         }
-    }
-
-    multiSurface1Btn.addEventListener('click', function() {
-        if (multiSurfaceActive === 0) {
-            clearMultiSurface();
-        } else {
-            showMultipleSurfaces(0);
-        }
-    });
-    multiSurface2Btn.addEventListener('click', function() {
-        if (multiSurfaceActive === 1) {
-            clearMultiSurface();
-        } else {
-            showMultipleSurfaces(1);
-        }
-    });
-
-    if (dropdown1) {
-        dropdown1.addEventListener('change', function() {
-            const selectedValue = Number(dropdown1.value);
-            if (selectedValue == chosen_vars[1]){
-                showNotification("Please select two different axes!", "warning");
-                dropdown1.value = chosen_vars[0];
-                return;
-            }
-            chosen_vars[0] = selectedValue;
-            updated_axis = true;
-            slider_changed = true;
-            control_index = [0, 0];
-            slider_1.noUiSlider.set(0);
-            slider_2.noUiSlider.set(0);
-            updateSliderLabels();
-            showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
-            updateColorbar(min_gpd, max_gpd, currentColormap);
-        });
-    }
-    if (dropdown2) {
-        dropdown2.addEventListener('change', function() {
-            const selectedValue = Number(dropdown2.value);
-            if (selectedValue == chosen_vars[0]){
-                showNotification("Please select two different axes!", "warning");
-                dropdown2.value = chosen_vars[1];
-                return;
-            }
-            chosen_vars[1] = selectedValue;
-            updated_axis = true;
-            slider_changed = true;
-            control_index = [0, 0];
-            slider_1.noUiSlider.set(0);
-            slider_2.noUiSlider.set(0);
-            updateSliderLabels();
-            showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
-            updateColorbar(min_gpd, max_gpd, currentColormap);
-        });
-    }
-
-    if (toggleViewBtn) {
-        toggleViewBtn.addEventListener('click', function() {
-            is2DView = !is2DView;
-            toggleViewBtn.innerHTML = is2DView
-                ? '<i class="fas fa-globe me-1"></i>3D View'
-                : '<i class="fas fa-map me-1"></i>2D Heatmap';
-            updateSceneInfo(is2DView ? "Switched to 2D heatmap" : "Switched to 3D view");
-            
-            if (is2DView) {
-                // Save current 3D camera state
-                camera_3d_state.up = camera.up.clone();
-                camera_3d_state.position = camera.position.clone();
-                camera_3d_state.quaternion = camera.quaternion.clone();
-                camera_3d_state.target = controls.target.clone();
-
-                // Switch to 2D top-down view
-                camera.position.set(0.5, 0.5, 2);
-                camera.quaternion.set(0, 0, 0, 1); // Reset rotation
-                camera.up.set(0, 1, 0); // Ensure Y is up
-                controls.target.set(0.5, 0.5, 0);
-                controls.noRotate = true; // Disable rotation
-            } else {
-                // Restore 3D camera state
-                if (camera_3d_state.position) {
-                    camera.up.copy(camera_3d_state.up);
-                    camera.position.copy(camera_3d_state.position);
-                    camera.quaternion.copy(camera_3d_state.quaternion);
-                    controls.target.copy(camera_3d_state.target);
-                } else {
-                    // Fallback to reset view if no state saved
-                    resetView();
-                }
-                controls.noRotate = false; // Enable rotation
-            }
-            controls.update();
-        });
-    }
-
-    if (colormapSelect) {
-        colormapSelect.addEventListener('change', function() {
-            currentColormap = colormapSelect.value;
-            showNotification(`Colormap changed to ${currentColormap}`, "info");
-            slider_changed = true;
-            updateColorbar(min_gpd, max_gpd, currentColormap);
-        });
-    }
-
-    if (dualColormapToggle) {
-        dualColormapToggle.addEventListener('change', function() {
-            useDualColormaps = dualColormapToggle.checked;
-            
-            if (useDualColormaps) {
-                singleColormapControls.style.display = 'none';
-                dualColormapControls.style.display = 'flex';
-                showNotification("Dual colormap mode enabled", "info");
-            } else {
-                singleColormapControls.style.display = 'flex';
-                dualColormapControls.style.display = 'none';
-                showNotification("Single colormap mode enabled", "info");
-            }
-            
-            slider_changed = true;
-            updateColorbar(min_gpd, max_gpd, useDualColormaps ? 'dual' : currentColormap);
-        });
-    }
-
-    if (positiveColormapSelect) {
-        positiveColormapSelect.addEventListener('change', function() {
-            currentPositiveColormap = positiveColormapSelect.value;
-            if (useDualColormaps) {
-                showNotification(`Positive colormap changed to ${currentPositiveColormap}`, "info");
-                slider_changed = true;
-                updateColorbar(min_gpd, max_gpd, 'dual');
-            }
-        });
-    }
-
-    if (negativeColormapSelect) {
-        negativeColormapSelect.addEventListener('change', function() {
-            currentNegativeColormap = negativeColormapSelect.value;
-            if (useDualColormaps) {
-                showNotification(`Negative colormap changed to ${currentNegativeColormap}`, "info");
-                slider_changed = true;
-                updateColorbar(min_gpd, max_gpd, 'dual');
-            }
-        });
-    }
-
-    if (resetViewBtn) {
-        resetViewBtn.addEventListener('click', resetView);
-    }
-
-    // Window resize handling
-    window.addEventListener('resize', function() {
-        camera.aspect = container.clientWidth / container.clientHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(container.clientWidth, container.clientHeight);
-    });
     
-    // Keyboard shortcuts
-    window.addEventListener('keydown', function(event) {
-        if (event.ctrlKey && event.key === 'r') {
-            event.preventDefault();
-            resetView();
+        function clearMultiSurface() {
+            multiSurfaceActive = null;
+            if (multiSurface1Btn) {
+                multiSurface1Btn.classList.remove('btn-secondary');
+                multiSurface1Btn.classList.add('btn-outline-secondary');
+            }
+            if (multiSurface2Btn) {
+                multiSurface2Btn.classList.remove('btn-secondary');
+                multiSurface2Btn.classList.add('btn-outline-secondary');
+            }
+            if (scene && scene.__multiSurfaces) {
+                scene.__multiSurfaces.forEach(m => scene.remove(m));
+                scene.__multiSurfaces = [];
+                renderer.render(scene, camera);
+            }
         }
-    });
-
-    const numSurfacesInput = document.getElementById('num-surfaces-input');
-    if (numSurfacesInput) {
-        numSurfacesInput.addEventListener('change', function() {
-            let val = parseInt(numSurfacesInput.value, 10);
-            if (isNaN(val) || val < 1) val = 1;
-            if (val > 50) val = 50;
-            NUM_SURFACES = val;
-            numSurfacesInput.value = val;
-            if (multiSurfaceActive === 0) showMultipleSurfaces(0);
-            if (multiSurfaceActive === 1) showMultipleSurfaces(1);
+    
+        multiSurface1Btn.addEventListener('click', function() {
+            if (multiSurfaceActive === 0) {
+                clearMultiSurface();
+            } else {
+                showMultipleSurfaces(0);
+            }
         });
-    }
-
-})
-.catch(error => {
-    loading_overlay.style.display = 'none';
-    main_content.innerHTML = `
-        <div style="color: red; text-align: center; margin-top: 50px; padding: 20px;">
-            <h3>Error Loading Data</h3>
-            <p>Failed to create the visualization scene.</p>
-            <div style="background-color: #ffebee; border: 1px solid #ffcdd2; border-radius: 4px; padding: 15px; margin: 20px auto; max-width: 600px; text-align: left;">
-                <strong>Error Details:</strong><br>
-                <code style="word-break: break-all;">${error.message}</code>
+        multiSurface2Btn.addEventListener('click', function() {
+            if (multiSurfaceActive === 1) {
+                clearMultiSurface();
+            } else {
+                showMultipleSurfaces(1);
+            }
+        });
+    
+        if (dropdown1) {
+            dropdown1.addEventListener('change', function() {
+                const selectedValue = Number(dropdown1.value);
+                if (selectedValue == chosen_vars[1]){
+                    showNotification("Please select two different axes!", "warning");
+                    dropdown1.value = chosen_vars[0];
+                    return;
+                }
+                chosen_vars[0] = selectedValue;
+                updated_axis = true;
+                slider_changed = true;
+                control_index = [0, 0];
+                slider_1.noUiSlider.set(0);
+                slider_2.noUiSlider.set(0);
+                updateSliderLabels();
+                showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
+                updateColorbar(min_gpd, max_gpd, currentColormap);
+            });
+        }
+        if (dropdown2) {
+            dropdown2.addEventListener('change', function() {
+                const selectedValue = Number(dropdown2.value);
+                if (selectedValue == chosen_vars[0]){
+                    showNotification("Please select two different axes!", "warning");
+                    dropdown2.value = chosen_vars[1];
+                    return;
+                }
+                chosen_vars[1] = selectedValue;
+                updated_axis = true;
+                slider_changed = true;
+                control_index = [0, 0];
+                slider_1.noUiSlider.set(0);
+                slider_2.noUiSlider.set(0);
+                updateSliderLabels();
+                showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
+                updateColorbar(min_gpd, max_gpd, currentColormap);
+            });
+        }
+    
+        if (toggleViewBtn) {
+            toggleViewBtn.addEventListener('click', function() {
+                is2DView = !is2DView;
+                toggleViewBtn.innerHTML = is2DView
+                    ? '<i class="fas fa-globe me-1"></i>3D View'
+                    : '<i class="fas fa-map me-1"></i>2D Heatmap';
+                updateSceneInfo(is2DView ? "Switched to 2D heatmap" : "Switched to 3D view");
+                
+                if (is2DView) {
+                    // Save current 3D camera state
+                    camera_3d_state.up = camera.up.clone();
+                    camera_3d_state.position = camera.position.clone();
+                    camera_3d_state.quaternion = camera.quaternion.clone();
+                    camera_3d_state.target = controls.target.clone();
+    
+                    // Switch to 2D top-down view
+                    camera.position.set(0.5, 0.5, 2);
+                    camera.quaternion.set(0, 0, 0, 1); // Reset rotation
+                    camera.up.set(0, 1, 0); // Ensure Y is up
+                    controls.target.set(0.5, 0.5, 0);
+                    controls.noRotate = true; // Disable rotation
+                } else {
+                    // Restore 3D camera state
+                    if (camera_3d_state.position) {
+                        camera.up.copy(camera_3d_state.up);
+                        camera.position.copy(camera_3d_state.position);
+                        camera.quaternion.copy(camera_3d_state.quaternion);
+                        controls.target.copy(camera_3d_state.target);
+                    } else {
+                        // Fallback to reset view if no state saved
+                        resetView();
+                    }
+                    controls.noRotate = false; // Enable rotation
+                }
+                controls.update();
+            });
+        }
+    
+        if (colormapSelect) {
+            colormapSelect.addEventListener('change', function() {
+                currentColormap = colormapSelect.value;
+                showNotification(`Colormap changed to ${currentColormap}`, "info");
+                slider_changed = true;
+                updateColorbar(min_gpd, max_gpd, currentColormap);
+            });
+        }
+    
+        if (dualColormapToggle) {
+            dualColormapToggle.addEventListener('change', function() {
+                useDualColormaps = dualColormapToggle.checked;
+                
+                if (useDualColormaps) {
+                    singleColormapControls.style.display = 'none';
+                    dualColormapControls.style.display = 'flex';
+                    showNotification("Dual colormap mode enabled", "info");
+                } else {
+                    singleColormapControls.style.display = 'flex';
+                    dualColormapControls.style.display = 'none';
+                    showNotification("Single colormap mode enabled", "info");
+                }
+                
+                slider_changed = true;
+                updateColorbar(min_gpd, max_gpd, useDualColormaps ? 'dual' : currentColormap);
+            });
+        }
+    
+        if (positiveColormapSelect) {
+            positiveColormapSelect.addEventListener('change', function() {
+                currentPositiveColormap = positiveColormapSelect.value;
+                if (useDualColormaps) {
+                    showNotification(`Positive colormap changed to ${currentPositiveColormap}`, "info");
+                    slider_changed = true;
+                    updateColorbar(min_gpd, max_gpd, 'dual');
+                }
+            });
+        }
+    
+        if (negativeColormapSelect) {
+            negativeColormapSelect.addEventListener('change', function() {
+                currentNegativeColormap = negativeColormapSelect.value;
+                if (useDualColormaps) {
+                    showNotification(`Negative colormap changed to ${currentNegativeColormap}`, "info");
+                    slider_changed = true;
+                    updateColorbar(min_gpd, max_gpd, 'dual');
+                }
+            });
+        }
+    
+        if (resetViewBtn) {
+            resetViewBtn.addEventListener('click', resetView);
+        }
+    
+        // Window resize handling
+        window.addEventListener('resize', function() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+        
+        // Keyboard shortcuts
+        window.addEventListener('keydown', function(event) {
+            if (event.ctrlKey && event.key === 'r') {
+                event.preventDefault();
+                resetView();
+            }
+        });
+    
+        const numSurfacesInput = document.getElementById('num-surfaces-input');
+        if (numSurfacesInput) {
+            numSurfacesInput.addEventListener('change', function() {
+                let val = parseInt(numSurfacesInput.value, 10);
+                if (isNaN(val) || val < 1) val = 1;
+                if (val > 50) val = 50;
+                NUM_SURFACES = val;
+                numSurfacesInput.value = val;
+                if (multiSurfaceActive === 0) showMultipleSurfaces(0);
+                if (multiSurfaceActive === 1) showMultipleSurfaces(1);
+            });
+        }
+    
+    })
+    .catch(error => {
+        loading_overlay.style.display = 'none';
+        main_content.innerHTML = `
+            <div style="color: red; text-align: center; margin-top: 50px; padding: 20px;">
+                <h3>Error Loading Data</h3>
+                <p>Failed to create the visualization scene.</p>
+                <div style="background-color: #ffebee; border: 1px solid #ffcdd2; border-radius: 4px; padding: 15px; margin: 20px auto; max-width: 600px; text-align: left;">
+                    <strong>Error Details:</strong><br>
+                    <code style="word-break: break-all;">${error.message}</code>
+                </div>
+                <p style="color: #666; font-size: 14px;">
+                    Please check the browser console for more details and ensure all data files are available.
+                </p>
             </div>
-            <p style="color: #666; font-size: 14px;">
-                Please check the browser console for more details and ensure all data files are available.
-            </p>
-        </div>
-    `;
-});
+        `;
+    });
+}
