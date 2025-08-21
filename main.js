@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
-import ndarray from 'ndarray'
-import noUiSlider from 'nouislider'
+import ndarray from 'ndarray';
+import noUiSlider from 'nouislider';
+import npyjs from 'npyjs';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
-import { evaluate_cmap } from "./colormap.js"
+import { evaluate_cmap } from "./colormap.js";
 
 let NUM_SURFACES = 10;
 const axis_labels = [
@@ -18,11 +19,11 @@ let chosen_vars = [1, 3]        // xi, Q2
 let remaining_vars = [0, 2];    // x, t
 let control_index = [0, 0];
 let dataFiles = [
-    { name: "x values (x.bin)", path: "data/x.bin", key: 'x' },
-    { name: "xi values (xi.bin)", path: "data/xi.bin", key: 'xi' },
-    { name: "t values (t.bin)", path: "data/t.bin", key: 't' },
-    { name: "Q² values (Q2.bin)", path: "data/Q2.bin", key: 'Q2' },
-    { name: "GPD data (gpd_4d.bin)", path: "data/gpd_4d.bin", key: 'gpd_4d' },
+    { name: "x values (x.npy)", path: "data/x.npy", key: 'x', type: 'npy' },
+    { name: "xi values (xi.npy)", path: "data/xi.npy", key: 'xi', type: 'npy' },
+    { name: "t values (t.npy)", path: "data/t.npy", key: 't', type: 'npy' },
+    { name: "Q² values (Q2.npy)", path: "data/Q2.npy", key: 'Q2', type: 'npy' },
+    { name: "GPD data (gpd_4d.npy)", path: "data/gpd_4d.npy", key: 'gpd_4d', type: 'npy' },
 ];
 let min_gpd = Number.MAX_VALUE;
 let max_gpd = Number.MIN_VALUE;
@@ -44,16 +45,32 @@ const toggleViewBtn = document.getElementById('toggle-view-btn');
 const resetViewBtn = document.getElementById('reset-view-btn');
 const colormapSelect = document.getElementById('colormap-select');
 
-// Dual colormap controls
-let currentColormap = 'viridis';
-let currentPositiveColormap = 'hot';
-let currentNegativeColormap = 'cool';
-let useDualColormaps = false;
-const dualColormapToggle = document.getElementById('dual-colormap-toggle');
-const singleColormapControls = document.getElementById('single-colormap-controls');
-const dualColormapControls = document.getElementById('dual-colormap-controls');
-const positiveColormapSelect = document.getElementById('positive-colormap-select');
-const negativeColormapSelect = document.getElementById('negative-colormap-select');
+// Only allow diverging colormaps for single colormap
+let divergingColormaps = ['coolwarm', 'RdBu', 'Spectral', 'PiYG', 'PRGn', 'BrBG', 'PuOr', 'RdGy', 'RdYlBu', 'RdYlGn'];
+let currentColormap = 'coolwarm';
+
+// Remove dual colormap toggle and controls from DOM
+if (document.getElementById('dual-colormap-toggle')) {
+    document.getElementById('dual-colormap-toggle').style.display = 'none';
+}
+if (document.getElementById('dual-colormap-controls')) {
+    document.getElementById('dual-colormap-controls').style.display = 'none';
+}
+if (document.getElementById('single-colormap-controls')) {
+    document.getElementById('single-colormap-controls').style.display = 'flex';
+}
+
+// Restrict colormapSelect to diverging colormaps only
+if (colormapSelect) {
+    colormapSelect.innerHTML = '';
+    divergingColormaps.forEach(cmap => {
+        let opt = document.createElement('option');
+        opt.value = cmap;
+        opt.textContent = cmap;
+        colormapSelect.appendChild(opt);
+    });
+    colormapSelect.value = currentColormap;
+}
 
 function create_axis_label(text, color) {
     const canvas = document.createElement('canvas');
@@ -91,19 +108,6 @@ function create_axis(center, width=8.0, scale=0.5, labelx="x", labely="y", label
     return [x_axis, y_axis, z_axis, x_label, y_label, z_label];
 }
 
-// Function to evaluate dual colormaps for positive and negative values
-function evaluateDualColormap(value, positiveColormap, negativeColormap, minValue, maxValue, midpoint = 0) {
-    if (value >= midpoint) {
-        // Normalize positive values from midpoint to maxValue
-        const normalizedValue = Math.min(1, Math.max(0, (value - midpoint) / (maxValue - midpoint)));
-        return evaluate_cmap(normalizedValue, positiveColormap, false);
-    } else {
-        // Normalize negative values from minValue to midpoint
-        const normalizedValue = Math.min(1, Math.max(0, (midpoint - value) / (midpoint - minValue)));
-        return evaluate_cmap(normalizedValue, negativeColormap, false);
-    }
-}
-
 function get_extreme(arr){
     let maxv = Number.MIN_VALUE;
     let minv = Number.MAX_VALUE;
@@ -125,24 +129,26 @@ function load_array(url) {
 
 function load_data_files() {
     const loadingText = document.querySelector('#loading-overlay .loading-text');
-    // If user uploaded files, use them
-    if (userDataPaths) {
-        const results = [];
-        for (const file of dataFiles) {
-            if (loadingText) {
-                loadingText.textContent = `Loading ${file.name}...`;
+    function load_file(path, type) {
+        if (path) {
+            const npy = new npyjs();
+            if (type === 'npy') {
+                return npy.load(path).then(obj => {
+                    return new Float64Array(Array.from(obj.data));
+                });
             }
-            results.push(load_array(userDataPaths[file.key]));
+            else {
+                return load_array(path);
+            }
         }
-        return results;
     }
-    // Otherwise, use default files (return array of Promises)
+
     const results = [];
     for (const file of dataFiles) {
         if (loadingText) {
             loadingText.textContent = `Loading ${file.name}...`;
         }
-        results.push(load_array(file.path));
+        results.push(load_file(file.path, file.type));
     }
     return results;
 }
@@ -156,24 +162,7 @@ function showNotification(message, type = 'info') {
     // Use the dedicated notification container
     const notificationContainer = document.getElementById('notification-container');
     if (!notificationContainer) return;
-
-    Object.assign(notification.style, {
-        marginBottom: '8px',
-        padding: '15px 20px',
-        borderRadius: '5px',
-        color: 'white',
-        fontSize: '14px',
-        fontWeight: '500',
-        boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
-        backgroundColor: type === 'success' ? '#4CAF50' : type === 'warning' ? '#FF9800' : '#2196F3',
-        textAlign: 'center',
-        minWidth: '200px',
-        maxWidth: '300px',
-        pointerEvents: 'none'
-    });
-
     notificationContainer.appendChild(notification);
-
     setTimeout(() => {
         notification.remove();
     }, 3000);
@@ -201,51 +190,22 @@ function updateColorbar(min, max, colormap) {
         colorbarLabels[0].textContent = max.toFixed(3);
         colorbarLabels[1].textContent = min.toFixed(3);
     }
-    
     // Update colorbar gradient
     const colorbar = document.querySelector('.colorbar');
     if (colorbar) {
-        if (useDualColormaps || colormap === 'dual') {
-            // Create a dual colormap gradient
-            let stops = [];
-            
-            // Negative values (bottom half)
-            for (let i = 0; i <= 50; i += 10) {
-                const value = (50 - i) / 50; // Reverse for negative values
-                let rgb = evaluate_cmap(value, currentNegativeColormap, false);
-                if (!rgb || rgb.length !== 3) {
-                    rgb = [255, 255, 255];
-                }
-                stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
+        let stops = [];
+        for (let i = 0; i <= 100; i += 10) {
+            const value = i / 100;
+            let rgb = evaluate_cmap(value, colormap, false);
+            if (!rgb || rgb.length !== 3) {
+                rgb = [255, 255, 255]; // fallback to white if colormap is invalid
             }
-            
-            // Positive values (top half)
-            for (let i = 50; i <= 100; i += 10) {
-                const value = (i - 50) / 50;
-                let rgb = evaluate_cmap(value, currentPositiveColormap, false);
-                if (!rgb || rgb.length !== 3) {
-                    rgb = [255, 255, 255];
-                }
-                stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
-            }
-            
-            colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
-        } else {
-            // Single colormap (existing code)
-            let stops = [];
-            for (let i = 0; i <= 100; i += 10) {
-                const value = i / 100;
-                let rgb = evaluate_cmap(value, colormap, false);
-                if (!rgb || rgb.length !== 3) {
-                    rgb = [255, 255, 255]; // fallback to white if colormap is invalid
-                }
-                stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
-            }
-            colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
+            stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
         }
+        colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
     }
 }
-
+ 
 function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar) {
     // stop any existing animation
     if (window[playingFlag]) {
@@ -275,7 +235,7 @@ function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar
         control_index[idx] = current;
         slider_changed = true;
         slider.noUiSlider.set(current);
-        updateColorbar(min_gpd, max_gpd, useDualColormaps ? 'dual' : currentColormap);
+        updateColorbar(min_gpd, max_gpd, currentColormap);
 
         // Show multiple surfaces if multi-surface mode is active
         if (multiSurfaceActive === idx) {
@@ -285,23 +245,11 @@ function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar
 }
 
 // --- Data Upload Handling ---
-let userDataPaths = null;
-
-function readFileAsArrayBuffer(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(file);
-    });
-}
-
 window.addEventListener('DOMContentLoaded', () => {
     const upload_form = document.getElementById('data-upload-form');
     const skipBtn = document.getElementById('skip-upload-btn');
 
     skipBtn.addEventListener('click', () => {
-        userDataPaths = null;
         upload_overlay.style.display = 'none';
         gpd_vis();
     });
@@ -318,21 +266,45 @@ window.addEventListener('DOMContentLoaded', () => {
             alert('Please select all required files.');
             return;
         }
-        userDataPaths = {
-            x: URL.createObjectURL(xFile),
-            xi: URL.createObjectURL(xiFile),
-            t: URL.createObjectURL(tFile),
-            Q2: URL.createObjectURL(Q2File),
-            gpd_4d: URL.createObjectURL(gpd4dFile)
-        };
+
+        // Helper function to determine file type from filename
+        function getFileType(filename) {
+            const extension = filename.toLowerCase().split('.').pop();
+            return extension === 'npy' ? 'npy' : 'bin';
+        }
+
+        const xURL = URL.createObjectURL(xFile);
+        const xiURL = URL.createObjectURL(xiFile);
+        const tURL = URL.createObjectURL(tFile);
+        const Q2URL = URL.createObjectURL(Q2File);
+        const gpd4dURL = URL.createObjectURL(gpd4dFile);
+
+        // Update paths and file types based on uploaded files
+        dataFiles[0].path = xURL;
+        dataFiles[0].type = getFileType(xFile.name);
+        dataFiles[1].path = xiURL;
+        dataFiles[1].type = getFileType(xiFile.name);
+        dataFiles[2].path = tURL;
+        dataFiles[2].type = getFileType(tFile.name);
+        dataFiles[3].path = Q2URL;
+        dataFiles[3].type = getFileType(Q2File.name);
+        dataFiles[4].path = gpd4dURL;
+        dataFiles[4].type = getFileType(gpd4dFile.name);
+
+        console.log("Updated dataFiles types:", dataFiles.map(f => ({ key: f.key, type: f.type })));
+
         gpd_vis();
     });
+});
+
+// Revoke any created object URLs when the page unloads
+window.addEventListener('beforeunload', () => {
+    revokeCreatedObjectURLs();
 });
 
 function gpd_vis() {
     Promise.all(load_data_files())
     .then(([x, xi, t, Q2, gpd_4d_flat]) => {
-        // If user uploaded, these are ArrayBuffers, else they are arrays from load_array
         x = new Float64Array(x);
         xi = new Float64Array(xi);
         t = new Float64Array(t);
@@ -364,7 +336,7 @@ function gpd_vis() {
         camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
     
         let renderer = new THREE.WebGLRenderer({antialias:true});
-        renderer.setClearColor(.1, .1, .1) 
+        renderer.setClearColor("#52576e");
         renderer.setSize( container.clientWidth, container.clientHeight );
         container.appendChild(renderer.domElement)
     
@@ -381,16 +353,12 @@ function gpd_vis() {
         let axis_scene;
         let geometry;
     
-        let material = new THREE.MeshStandardMaterial({
-            vertexColors: true,    
-            side: THREE.DoubleSide,
-            metalness: 0.1,
-            roughness: 0.5
+        // Remove all lights for flat shading
+        // Use MeshBasicMaterial so lighting does not affect the color
+        let material = new THREE.MeshBasicMaterial({
+            vertexColors: true,    // Use per-vertex color from colormap
+            side: THREE.DoubleSide
         });
-        let ambient_light = new THREE.AmbientLight(0xffffff, 0.1);
-        let dir_light = new THREE.DirectionalLight(0xffffff, 2);
-        dir_light.position.set(1, 1, 1);
-        dir_light.castShadow = true;
     
         let axis_camera = new THREE.OrthographicCamera(-2, 2, 2, -2, -1000, 1000);
     
@@ -430,8 +398,6 @@ function gpd_vis() {
                 let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
                 global_axis.forEach(element => { scene.add(element); });
                 scene.add(plane);
-                scene.add(dir_light);
-                scene.add(ambient_light);
     
                 axis_scene = new THREE.Scene();
                 let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
@@ -464,16 +430,7 @@ function gpd_vis() {
                     let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
                     let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
                     positions.setZ(i, is2DView ? 0 : gpd_value);
-                    let color;
-    
-                    if (useDualColormaps) {
-                        // Normalize the raw value to [-1, 1] range for dual colormap
-                        let normalizedForDual = (gpd_raw_value - (min_gpd + max_gpd) / 2) / ((max_gpd - min_gpd) / 2);
-                        color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
-                    } else {
-                        color = evaluate_cmap(gpd_value, currentColormap, false);
-                    }
-    
+                    let color = evaluate_cmap(gpd_value, currentColormap, false);
                     colors[i * 3] = color[0] / 255.;
                     colors[i * 3 + 1] = color[1] / 255.;
                     colors[i * 3 + 2] = color[2] / 255.;
@@ -660,12 +617,7 @@ function gpd_vis() {
                     let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
                     let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
                     surfacePositions.setZ(j, is2DView ? 0 : gpd_value);
-                    let color;
-                    if (useDualColormaps) {
-                        color = evaluateDualColormap(gpd_raw_value, currentPositiveColormap, currentNegativeColormap, min_gpd, max_gpd, 0);
-                    } else {
-                        color = evaluate_cmap(gpd_value, currentColormap, false);
-                    }
+                    let color = evaluate_cmap(gpd_value, currentColormap, false);
                     surfaceColors[j * 3] = color[0] / 255.;
                     surfaceColors[j * 3 + 1] = color[1] / 255.;
                     surfaceColors[j * 3 + 2] = color[2] / 255.;
@@ -801,47 +753,6 @@ function gpd_vis() {
                 showNotification(`Colormap changed to ${currentColormap}`, "info");
                 slider_changed = true;
                 updateColorbar(min_gpd, max_gpd, currentColormap);
-            });
-        }
-    
-        if (dualColormapToggle) {
-            dualColormapToggle.addEventListener('change', function() {
-                useDualColormaps = dualColormapToggle.checked;
-                
-                if (useDualColormaps) {
-                    singleColormapControls.style.display = 'none';
-                    dualColormapControls.style.display = 'flex';
-                    showNotification("Dual colormap mode enabled", "info");
-                } else {
-                    singleColormapControls.style.display = 'flex';
-                    dualColormapControls.style.display = 'none';
-                    showNotification("Single colormap mode enabled", "info");
-                }
-                
-                slider_changed = true;
-                updateColorbar(min_gpd, max_gpd, useDualColormaps ? 'dual' : currentColormap);
-            });
-        }
-    
-        if (positiveColormapSelect) {
-            positiveColormapSelect.addEventListener('change', function() {
-                currentPositiveColormap = positiveColormapSelect.value;
-                if (useDualColormaps) {
-                    showNotification(`Positive colormap changed to ${currentPositiveColormap}`, "info");
-                    slider_changed = true;
-                    updateColorbar(min_gpd, max_gpd, 'dual');
-                }
-            });
-        }
-    
-        if (negativeColormapSelect) {
-            negativeColormapSelect.addEventListener('change', function() {
-                currentNegativeColormap = negativeColormapSelect.value;
-                if (useDualColormaps) {
-                    showNotification(`Negative colormap changed to ${currentNegativeColormap}`, "info");
-                    slider_changed = true;
-                    updateColorbar(min_gpd, max_gpd, 'dual');
-                }
             });
         }
     

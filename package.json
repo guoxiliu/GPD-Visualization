@@ -17,6 +17,7 @@
   "dependencies": {
     "ndarray": "^1.0.19",
     "nouislider": "^15.8.1",
+    "npyjs": "^0.7.0",
     "three": "^0.169.0",
     "vite-plugin-static-copy": "^3.1.1"
   },

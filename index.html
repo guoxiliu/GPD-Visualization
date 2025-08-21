@@ -20,7 +20,7 @@
         }
         .colorbar-labels {
             font-size: 0.8em;
-            color: #555;
+            color: #fff;
             text-align: center;
         }
         #loading-overlay {
@@ -73,38 +73,79 @@
             background: #5a6fd8;
             transform: scale(1.2);
         }
+        /* Colorbar zero marker styles */
+        #colorbar-zero-marker {
+            position: absolute;
+            left: -8px;
+            width: 36px;
+            height: 0;
+            border-top: 2px dashed #fff;
+            opacity: 0.8;
+            pointer-events: none;
+            z-index: 2;
+        }
+        #colorbar-zero-marker .zero-label {
+            position: absolute;
+            left: 22px;
+            top: -10px;
+            font-size: 0.8em;
+            color: #fff;
+            text-shadow: 0 0 2px #000;
+        }
+        .notification {
+            margin-bottom: 8px;
+            padding: 15px 20px;
+            border-radius: 5px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            text-align: center;
+            min-width: 200px;
+            max-width: 300px;
+            pointer-events: none;
+        }
+        .notification.info {
+            background-color: #2196F3;
+        }
+        .notification.success {
+            background-color: #4CAF50;
+        }
+        .notification.warning {
+            background-color: #FF9800;
+        }
     </style>
 </head>
 
 <body class="d-flex flex-column vh-100">
     <!-- Data upload module -->
-    <div id="data-upload-overlay" class="position-fixed top-0 start-0 w-100 h-100 justify-content-center align-items-center bg-light" style="z-index:10000;">
-        <div class="modal-dialog modal-dialog-centered" style="max-width: 500px; width: 100%;">
+    <div id="data-upload-overlay" class="position-fixed top-0 start-0 w-100 h-100 bg-light" style="z-index:10000; overflow-y: auto;">
+        <div class="modal-dialog" style="max-width: 600px; width: 100%;">
             <div class="modal-content p-4">
-                <h2 class="mb-3 text-center text-primary"><i class="fas fa-upload me-2"></i>Upload Data Files</h2>
-                <p class="text-muted text-center mb-4" style="font-size:1.05em;">Select your own data files to explore, or skip to use the default data arrays. (Binary file format, e.g., .bin)</p>
+                <h2 class="my-3 text-center text-primary"><i class="fas fa-upload me-2"></i>Upload Data Files</h2>
+                <p class="text-muted text-center mb-3" style="font-size:1.05em;">Select your own data files to explore, or skip to use the default data arrays. (Binary or NumPy file format, e.g., .bin or .npy)</p>
                 <form id="data-upload-form">
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label class="form-label">x values (e.g., x.bin)</label>
                         <input type="file" class="form-control" id="file-x" required>
                     </div>
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label class="form-label">x<sub>i</sub> values (e.g., xi.bin)</label>
                         <input type="file" class="form-control" id="file-xi" required>
                     </div>
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label class="form-label">t values (e.g., t.bin)</label>
                         <input type="file" class="form-control" id="file-t" required>
                     </div>
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label class="form-label">Q<sup>2</sup> values (e.g., Q2.bin)</label>
                         <input type="file" class="form-control" id="file-Q2" required>
                     </div>
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label class="form-label">GPD data (e.g., gpd_4d.bin)</label>
                         <input type="file" class="form-control" id="file-gpd4d" required>
                     </div>
-                    <div class="d-flex justify-content-between mt-4">
+                    <div class="d-flex justify-content-between mt-3">
                         <button type="button" class="btn btn-outline-secondary" id="skip-upload-btn">Skip (use default)</button>
                         <button type="submit" class="btn btn-primary">Load Data</button>
                     </div>
@@ -115,7 +156,7 @@
 
     <div class="bg-primary text-white text-center py-4 shadow">
         <h1 class="mb-0">GPD Visualization</h1>
-        <div class="fs-5 opacity-75">Yansong Yu, Guoxi Liu</div>
+        <div class="fs-5 opacity-75">Guoxi Liu</div>
     </div>
     <div id="loading-overlay">
         <div class="spinner"></div>
@@ -202,37 +243,19 @@
                             <!-- Second Row: Colormap Controls -->
                             <div class="d-flex align-items-center">
                                 <span class="text-muted mx-2 fw-semibold">Colormap</span>
-                                <div class="align-items-center">
-                                    <label>
-                                        <input type="checkbox" id="dual-colormap-toggle" class="form-check-input me-1"> 
-                                        Dual
-                                    </label>
-                                </div>
                                 <div id="single-colormap-controls" class="align-items-center" style="display: flex;">
-                                    <label for="colormap-select" class="form-label ms-3 me-1 mb-0">Colormap:</label>
                                     <select id="colormap-select" class="form-select form-select-sm w-auto me-2">
-                                        <option value="cividis">Cividis</option>
-                                        <option value="inferno">Inferno</option>
-                                        <option value="magma">Magma</option>
-                                        <option value="rainbow">Rainbow</option>
-                                        <option value="turbo">Turbo</option>
-                                        <option value="viridis">Viridis</option>
-                                    </select>
-                                </div>
-                                <div id="dual-colormap-controls" class="align-items-center" style="display: none;">
-                                    <label for="positive-colormap-select" class="form-label ms-3 me-1 mb-0">Positive:</label>
-                                    <select id="positive-colormap-select" class="form-select form-select-sm w-auto me-2">
-                                        <option value="hot">Hot</option>
-                                        <option value="summer">Summer</option>
-                                        <option value="autumn">Autumn</option>
-                                        <option value="viridis">Viridis</option>
-                                    </select>
-                                    <label for="negative-colormap-select" class="form-label mb-0 mx-1">Negative:</label>
-                                    <select id="negative-colormap-select" class="form-select form-select-sm w-auto me-2">
-                                        <option value="cool">Cool</option>
-                                        <option value="winter">Winter</option>
-                                        <option value="spring">Spring</option>
-                                        <option value="cividis">Cividis</option>
+                                        <!-- Diverging colormaps only -->
+                                        <option value="coolwarm">Coolwarm</option>
+                                        <option value="RdBu">RdBu</option>
+                                        <option value="Spectral">Spectral</option>
+                                        <option value="PiYG">PiYG</option>
+                                        <option value="PRGn">PRGn</option>
+                                        <option value="BrBG">BrBG</option>
+                                        <option value="PuOr">PuOr</option>
+                                        <option value="RdGy">RdGy</option>
+                                        <option value="RdYlBu">RdYlBu</option>
+                                        <option value="RdYlGn">RdYlGn</option>
                                     </select>
                                 </div>
                             </div>
