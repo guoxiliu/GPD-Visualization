@@ -190,13 +190,13 @@
                             <div class="pt-4 mb-4">
                                 <div class="d-flex align-items-center mb-2 pb-4">
                                     <span id="slider1-label" class="me-2" style="min-width: 40px;">Value:</span>
-                                    <div id="slider_1" class="flex-grow-1 me-2"></div>
+                                    <div id="slider1" class="flex-grow-1 me-2"></div>
                                     <button id="play-slider1" class="btn btn-outline-secondary btn-sm ms-2" title="Play Animation" style="font-size: 1em;"><i class="fas fa-play"></i></button>
                                     <button id="multi-surface1" class="btn btn-outline-secondary btn-sm ms-2" title="Show Multiple Surfaces" style="font-size: 1em;"><i class="fas fa-layer-group"></i></button>
                                 </div>
                                 <div class="d-flex align-items-center pt-2">
                                     <span id="slider2-label" class="me-2" style="min-width: 40px;">Value:</span>
-                                    <div id="slider_2" class="flex-grow-1 me-2"></div>
+                                    <div id="slider2" class="flex-grow-1 me-2"></div>
                                     <button id="play-slider2" class="btn btn-outline-secondary btn-sm ms-2" title="Play Animation" style="font-size: 1em;"><i class="fas fa-play"></i></button>
                                     <button id="multi-surface2" class="btn btn-outline-secondary btn-sm ms-2" title="Show Multiple Surfaces" style="font-size: 1em;"><i class="fas fa-layer-group"></i></button>
                                 </div>
@@ -230,7 +230,6 @@
                                 <div class="d-flex align-items-center">
                                     <span class="text-muted mx-2 fw-semibold">View Controls</span>
                                     <button id="toggle-view-btn" class="btn btn-outline-primary btn-sm ms-2">
-                                        <i class="fas fa-map me-1"></i> 2D Heatmap
                                     </button>
                                     <button id="reset-view-btn" class="btn btn-outline-secondary btn-sm ms-2">
                                         <i class="fas fa-rotate-right me-1"></i> Reset View
@@ -260,13 +259,17 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- Shared Colorbar Component -->
+                        <div id="colorbar-container" class="colorbar-container position-absolute top-0 end-0 m-2 d-flex flex-column align-items-center" style="z-index: 20;">
+                            <div class="colorbar-labels">Max</div>
+                            <div class="colorbar"></div>
+                            <div class="colorbar-labels">Min</div>
+                        </div>
                         <!-- Three.js Container -->
                         <div id="three-container" class="bg-white rounded-bottm shadow position-relative flex-grow-1">
-                            <div class="colorbar-container position-absolute top-0 end-0 m-2 d-flex flex-column align-items-center">
-                                <div class="colorbar-labels">Max</div>
-                                <div class="colorbar"></div>
-                                <div class="colorbar-labels">Min</div>
-                            </div>
+                        </div>
+                        <!-- D3 Heatmap Container -->
+                        <div id="heatmap-container" class="rounded-bottom shadow position-relative flex-grow-1" style="background: #52576e;">
                         </div>
                     </div>
                 </div>

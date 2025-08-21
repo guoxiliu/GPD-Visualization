@@ -7,8 +7,8 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { evaluate_cmap } from "./colormap.js";
+import * as d3 from 'd3';
 
-let NUM_SURFACES = 10;
 const axis_labels = [
     'x',
     'x\u1d62', // unicode subscript i
@@ -25,8 +25,9 @@ let dataFiles = [
     { name: "Q² values (Q2.npy)", path: "data/Q2.npy", key: 'Q2', type: 'npy' },
     { name: "GPD data (gpd_4d.npy)", path: "data/gpd_4d.npy", key: 'gpd_4d', type: 'npy' },
 ];
-let min_gpd = Number.MAX_VALUE;
 let max_gpd = Number.MIN_VALUE;
+let min_gpd = Number.MAX_VALUE;
+let multiSurfaceActive = null; // null, 0, or 1
 let slider_changed = true;
 let updated_axis = true;
 
@@ -36,28 +37,35 @@ let main_content = document.getElementById('main-content');
 
 const dropdown1 = document.getElementById('dropdown1');
 const dropdown2 = document.getElementById('dropdown2');
-const slider_1 = document.getElementById('slider_1');
-const slider_2 = document.getElementById('slider_2');
+const slider1 = document.getElementById('slider1');
+const slider2 = document.getElementById('slider2');
+
+const multiSurface1Btn = document.getElementById('multi-surface1');
+const multiSurface2Btn = document.getElementById('multi-surface2');
+const numSurfacesInput = document.getElementById('num-surfaces-input');
+let num_surfaces = 10;
+
 const playSlider1Btn = document.getElementById('play-slider1');
 const playSlider2Btn = document.getElementById('play-slider2');
 
+let is2DView = true;
 const toggleViewBtn = document.getElementById('toggle-view-btn');
 const resetViewBtn = document.getElementById('reset-view-btn');
 const colormapSelect = document.getElementById('colormap-select');
+
+const colorbarContainer = document.getElementById('colorbar-container');
+const threeContainer = document.getElementById("three-container");
+const heatmapContainer = document.getElementById('heatmap-container');
 
 // Only allow diverging colormaps for single colormap
 let divergingColormaps = ['coolwarm', 'RdBu', 'Spectral', 'PiYG', 'PRGn', 'BrBG', 'PuOr', 'RdGy', 'RdYlBu', 'RdYlGn'];
 let currentColormap = 'coolwarm';
 
-// Remove dual colormap toggle and controls from DOM
-if (document.getElementById('dual-colormap-toggle')) {
-    document.getElementById('dual-colormap-toggle').style.display = 'none';
-}
-if (document.getElementById('dual-colormap-controls')) {
-    document.getElementById('dual-colormap-controls').style.display = 'none';
-}
-if (document.getElementById('single-colormap-controls')) {
-    document.getElementById('single-colormap-controls').style.display = 'flex';
+// Initialize toggleViewBtn text based on is2DView
+if (toggleViewBtn) {
+    toggleViewBtn.innerHTML = is2DView
+        ? '<i class="fas fa-globe me-1"></i>3D View'
+        : '<i class="fas fa-map me-1"></i>2D Heatmap';
 }
 
 // Restrict colormapSelect to diverging colormaps only
@@ -183,29 +191,37 @@ function updateSliderLabels() {
     document.getElementById('slider2-label').textContent = axis_labels[remaining_vars[1]] + ': ';
 }
 
+// Update colorbar min/max labels and gradient for the single colorbar
 function updateColorbar(min, max, colormap) {
-    // Update min/max labels
-    const colorbarLabels = document.querySelectorAll('.colorbar-labels');
-    if (colorbarLabels.length >= 2) {
-        colorbarLabels[0].textContent = max.toFixed(3);
-        colorbarLabels[1].textContent = min.toFixed(3);
+    const labels = colorbarContainer.querySelectorAll('.colorbar-labels');
+    if (labels.length >= 2) {
+        labels[0].textContent = max.toFixed(3);
+        labels[1].textContent = min.toFixed(3);
     }
-    // Update colorbar gradient
-    const colorbar = document.querySelector('.colorbar');
+    const colorbar = colorbarContainer.querySelector('.colorbar');
     if (colorbar) {
         let stops = [];
         for (let i = 0; i <= 100; i += 10) {
             const value = i / 100;
             let rgb = evaluate_cmap(value, colormap, false);
             if (!rgb || rgb.length !== 3) {
-                rgb = [255, 255, 255]; // fallback to white if colormap is invalid
+                rgb = [255, 255, 255];
             }
             stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
         }
         colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
     }
 }
- 
+
+// Move colorbar-container to correct parent on view switch
+function moveColorbarToCurrentView() {
+    if (is2DView) {
+        heatmapContainer.appendChild(colorbarContainer);
+    } else {
+        threeContainer.appendChild(colorbarContainer);
+    }
+}
+
 function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar) {
     // stop any existing animation
     if (window[playingFlag]) {
@@ -297,11 +313,6 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Revoke any created object URLs when the page unloads
-window.addEventListener('beforeunload', () => {
-    revokeCreatedObjectURLs();
-});
-
 function gpd_vis() {
     Promise.all(load_data_files())
     .then(([x, xi, t, Q2, gpd_4d_flat]) => {
@@ -321,7 +332,6 @@ function gpd_vis() {
         let dims = [x.length, xi.length, t.length, Q2.length];
         let gpd_4d = new ndarray(gpd_4d_flat, dims);
         [min_gpd, max_gpd] = get_extreme(gpd_4d_flat);
-        let is2DView = false;
         let camera_3d_state = {};
     
         console.log("min_gpd:", min_gpd, "max_gpd:", max_gpd);
@@ -330,16 +340,15 @@ function gpd_vis() {
         document.querySelectorAll('.colorbar-labels')[0].textContent = `${max_gpd.toFixed(3)}`;
         document.querySelectorAll('.colorbar-labels')[1].textContent = `${min_gpd.toFixed(3)}`;
     
-        let container = document.getElementById("three-container")
-        let camera = new THREE.PerspectiveCamera(75, container.clientWidth /  container.clientHeight, 0.1, 1000);
+        let camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth /  threeContainer.clientHeight, 0.1, 1000);
         camera.position.set(0.345, -0.597, 0.970);
         camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
     
         let renderer = new THREE.WebGLRenderer({antialias:true});
         renderer.setClearColor("#52576e");
-        renderer.setSize( container.clientWidth, container.clientHeight );
-        container.appendChild(renderer.domElement)
-    
+        renderer.setSize( threeContainer.clientWidth, threeContainer.clientHeight );
+        threeContainer.appendChild(renderer.domElement);
+
         let controls = new TrackballControls(camera, renderer.domElement);
         controls.rotateSpeed = 3.0;
         controls.zoomSpeed = 1.0;
@@ -359,9 +368,114 @@ function gpd_vis() {
             vertexColors: true,    // Use per-vertex color from colormap
             side: THREE.DoubleSide
         });
-    
         let axis_camera = new THREE.OrthographicCamera(-2, 2, 2, -2, -1000, 1000);
-    
+
+        // Helper to draw D3 heatmap for current 2D slice
+        function drawHeatmap() {
+            heatmapContainer.innerHTML = '';
+            const axis1 = chosen_vars[0];
+            const axis2 = chosen_vars[1];
+            const arr1 = x_xi_t_Q2_array[axis1];
+            const arr2 = x_xi_t_Q2_array[axis2];
+            // Prepare 2D data slice for D3
+            const slice = [];
+            for (let j = 0; j < arr2.length; j++) {
+                for (let i = 0; i < arr1.length; i++) {
+                    let query_index = [0, 0, 0, 0];
+                    query_index[axis1] = i;
+                    query_index[axis2] = j;
+                    query_index[remaining_vars[0]] = control_index[0];
+                    query_index[remaining_vars[1]] = control_index[1];
+                    let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                    slice.push({
+                        i: i,
+                        j: j,
+                        value: gpd_raw_value
+                    });
+                }
+            }
+            // D3 heatmap as grid of squares
+            const margin = {top: 30, right: 50, bottom: 30, left: 30};
+            const width = heatmapContainer.clientWidth - margin.left - margin.right;
+            const height = heatmapContainer.clientHeight - margin.top - margin.bottom;
+            const svg = d3.select(heatmapContainer)
+                .append('svg')
+                .attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom)
+                .append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+            // Build X scales and axis
+            const x = d3.scaleBand()
+                .range([0, width])
+                .domain(d3.range(arr1.length))
+                .padding(0);
+            
+            // svg.append('g')
+            //     .attr('transform', `translate(0, ${height})`)
+                // .call(d3.axisBottom(x))
+            
+            // Build Y scales and axis
+            const y = d3.scaleBand()
+                .range([height, 0])
+                .domain(d3.range(arr2.length))
+                .padding(0);
+            // svg.append('g')
+                // .call(d3.axisLeft(y))
+            
+            // Draw squares
+            svg.selectAll('rect')
+                .data(slice)
+                .join('rect')
+                .attr('x', d => x(d.i))
+                .attr('y', d => y(d.j))
+                .attr('width', x.bandwidth())
+                .attr('height', y.bandwidth())
+                .style('fill', d => {
+                    let norm = (d.value - min_gpd) / (max_gpd - min_gpd);
+                    norm = Math.max(0, Math.min(1, norm));
+                    let rgb = evaluate_cmap(norm, currentColormap, false);
+                    return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+                });
+            
+            // Axis labels
+            svg.append('text')
+                .attr('x', width/2)
+                .attr('y', height + 15)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '16px')
+                .attr('fill', 'white')
+                .text(axis_labels[axis1]);
+            svg.append('text')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -height/2)
+                .attr('y', -margin.left + 20)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '16px')
+                .attr('fill', 'white')
+                .text(axis_labels[axis2]);
+        }
+
+        // Toggle between Three.js and D3 heatmap
+        function updateViewMode() {
+            if (is2DView) {
+                threeContainer.style.display = 'none';
+                heatmapContainer.style.display = 'block';
+                drawHeatmap();
+                // Disable multi-surface controls in 2D view
+                if (multiSurface1Btn) multiSurface1Btn.disabled = true;
+                if (multiSurface2Btn) multiSurface2Btn.disabled = true;
+                if (numSurfacesInput) numSurfacesInput.disabled = true;
+            } else {
+                threeContainer.style.display = 'block';
+                heatmapContainer.style.display = 'none';
+                // Enable multi-surface controls in 3D view
+                if (multiSurface1Btn) multiSurface1Btn.disabled = false;
+                if (multiSurface2Btn) multiSurface2Btn.disabled = false;
+                if (numSurfacesInput) numSurfacesInput.disabled = false;
+            }
+            moveColorbarToCurrentView();
+        }
+
         function animate() {
             if (updated_axis) {
                 updated_axis = false;
@@ -372,7 +486,7 @@ function gpd_vis() {
                 [min_axis1, max_axis1] = get_extreme(arrays1[0]);
                 [min_axis2, max_axis2] = get_extreme(arrays1[1]);
     
-                slider_1.noUiSlider.updateOptions({
+                slider1.noUiSlider.updateOptions({
                     range: {
                         min: 0,
                         max: arrays2[0].length - 1
@@ -382,7 +496,7 @@ function gpd_vis() {
                     },
                 });
     
-                slider_2.noUiSlider.updateOptions({
+                slider2.noUiSlider.updateOptions({
                     range: {
                         min: 0,
                         max: arrays2[1].length - 1
@@ -440,7 +554,7 @@ function gpd_vis() {
                 geometry.computeVertexNormals();
             }
     
-            renderer.setViewport(0, 0, container.clientWidth, container.clientHeight);
+            renderer.setViewport(0, 0, threeContainer.clientWidth, threeContainer.clientHeight);
             controls.update();
             renderer.clear();
             renderer.render(scene, camera);
@@ -454,8 +568,14 @@ function gpd_vis() {
         }
         renderer.setAnimationLoop( animate );
     
-        noUiSlider.create(slider_1, {
-            start: [0],  
+        // Calculate middle indices for sliders
+        const middle0 = Math.floor(arrays2[0].length / 2);
+        const middle1 = Math.floor(arrays2[1].length / 2);
+        control_index[0] = middle0;
+        control_index[1] = middle1;
+
+        noUiSlider.create(slider1, {
+            start: [0],
             tooltips: { 
                 to: function (value) { return arrays2[0][Math.round(value)]; } 
             },
@@ -465,11 +585,11 @@ function gpd_vis() {
                 max: arrays2[0].length - 1
             },
         });
-    
-        noUiSlider.create(slider_2, {
-            start: [0], 
+
+        noUiSlider.create(slider2, {
+            start: [0],
             tooltips: { 
-                to: function (value) { return arrays2[0][Math.round(value)]; } 
+                to: function (value) { return arrays2[1][Math.round(value)]; } 
             },
             step: 1,
             range: {
@@ -477,10 +597,15 @@ function gpd_vis() {
                 max: arrays2[1].length - 1
             },
         });
+
+        // Ensure UI matches initial values
+        slider1.noUiSlider.set(middle0);
+        slider2.noUiSlider.set(middle1);
     
         updateSliderLabels();
         updateColorbar(min_gpd, max_gpd, currentColormap);
         updateSceneInfo('Scene ready');
+        updateViewMode(); // Ensure correct view is shown on load
     
         function resetView() {
             // Reset main camera
@@ -503,8 +628,8 @@ function gpd_vis() {
         }
     
         /* Add event listeners below */
-        if (slider_1) {
-            slider_1.noUiSlider.on('change', function(values, handle) {
+        if (slider1) {
+            slider1.noUiSlider.on('change', function(values, handle) {
                 control_index[0] = Number(values[0]);
                 slider_changed = true;
                 if (multiSurfaceActive === 0) {
@@ -512,9 +637,15 @@ function gpd_vis() {
                 } else {
                     clearMultiSurface();
                 }
+                // Update view depending on current mode
+                if (is2DView) {
+                    drawHeatmap();
+                } else {
+                    // 3D view: animate() will update scene on next frame
+                }
             });
             // Stop animation if user interacts with slider manually
-            slider_1.noUiSlider.on('start', function() {
+            slider1.noUiSlider.on('start', function() {
                 if (window.slider1Playing) {
                     window.slider1Playing = false;
                     playSlider1Btn.innerHTML = '<i class="fas fa-play"></i>';
@@ -523,8 +654,8 @@ function gpd_vis() {
                 }
             });
         }
-        if (slider_2) {
-            slider_2.noUiSlider.on('change', function(values, handle) {
+        if (slider2) {
+            slider2.noUiSlider.on('change', function(values, handle) {
                 control_index[1] = Number(values[0]);
                 slider_changed = true;
                 if (multiSurfaceActive === 1) {
@@ -532,8 +663,14 @@ function gpd_vis() {
                 } else {
                     clearMultiSurface();
                 }
+                // Update view depending on current mode
+                if (is2DView) {
+                    drawHeatmap();
+                } else {
+                    // 3D view: animate() will update scene on next frame
+                }
             });
-            slider_2.noUiSlider.on('start', function() {
+            slider2.noUiSlider.on('start', function() {
                 if (window.slider2Playing) {
                     window.slider2Playing = false;
                     playSlider2Btn.innerHTML = '<i class="fas fa-play"></i>';
@@ -545,18 +682,14 @@ function gpd_vis() {
     
         if (playSlider1Btn) {
             playSlider1Btn.addEventListener('click', function() {
-                animateSlider(slider_1, arrays2[0], 0, playSlider1Btn, 'slider1Playing', 'slider1Interval');
+                animateSlider(slider1, arrays2[0], 0, playSlider1Btn, 'slider1Playing', 'slider1Interval');
             });
         }
         if (playSlider2Btn) {
             playSlider2Btn.addEventListener('click', function() {
-                animateSlider(slider_2, arrays2[1], 1, playSlider2Btn, 'slider2Playing', 'slider2Interval');
+                animateSlider(slider2, arrays2[1], 1, playSlider2Btn, 'slider2Playing', 'slider2Interval');
             });
         }
-    
-        const multiSurface1Btn = document.getElementById('multi-surface1');
-        const multiSurface2Btn = document.getElementById('multi-surface2');
-        let multiSurfaceActive = null; // null, 0, or 1
     
         // Helper to stop any animation
         function stopAllAnimations() {
@@ -588,9 +721,9 @@ function gpd_vis() {
             }
             const offset = -5;
             const centerIdx = control_index[idx];
-            const maxDistance = Math.floor(NUM_SURFACES / 2);
+            const maxDistance = Math.floor(num_surfaces / 2);
             const surfaces = [];
-            for (let i = 0; i < NUM_SURFACES; i++) {
+            for (let i = 0; i < num_surfaces; i++) {
                 let surfaceIdx = centerIdx + offset + i;
                 // Clamp to valid range
                 const arrLen = idx === 0 ? arrays2[0].length : arrays2[1].length;
@@ -682,8 +815,8 @@ function gpd_vis() {
                 updated_axis = true;
                 slider_changed = true;
                 control_index = [0, 0];
-                slider_1.noUiSlider.set(0);
-                slider_2.noUiSlider.set(0);
+                slider1.noUiSlider.set(0);
+                slider2.noUiSlider.set(0);
                 updateSliderLabels();
                 showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
                 updateColorbar(min_gpd, max_gpd, currentColormap);
@@ -701,8 +834,8 @@ function gpd_vis() {
                 updated_axis = true;
                 slider_changed = true;
                 control_index = [0, 0];
-                slider_1.noUiSlider.set(0);
-                slider_2.noUiSlider.set(0);
+                slider1.noUiSlider.set(0);
+                slider2.noUiSlider.set(0);
                 updateSliderLabels();
                 showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
                 updateColorbar(min_gpd, max_gpd, currentColormap);
@@ -716,21 +849,8 @@ function gpd_vis() {
                     ? '<i class="fas fa-globe me-1"></i>3D View'
                     : '<i class="fas fa-map me-1"></i>2D Heatmap';
                 updateSceneInfo(is2DView ? "Switched to 2D heatmap" : "Switched to 3D view");
-                
-                if (is2DView) {
-                    // Save current 3D camera state
-                    camera_3d_state.up = camera.up.clone();
-                    camera_3d_state.position = camera.position.clone();
-                    camera_3d_state.quaternion = camera.quaternion.clone();
-                    camera_3d_state.target = controls.target.clone();
-    
-                    // Switch to 2D top-down view
-                    camera.position.set(0.5, 0.5, 2);
-                    camera.quaternion.set(0, 0, 0, 1); // Reset rotation
-                    camera.up.set(0, 1, 0); // Ensure Y is up
-                    controls.target.set(0.5, 0.5, 0);
-                    controls.noRotate = true; // Disable rotation
-                } else {
+                updateViewMode();
+                if (!is2DView) {
                     // Restore 3D camera state
                     if (camera_3d_state.position) {
                         camera.up.copy(camera_3d_state.up);
@@ -738,35 +858,35 @@ function gpd_vis() {
                         camera.quaternion.copy(camera_3d_state.quaternion);
                         controls.target.copy(camera_3d_state.target);
                     } else {
-                        // Fallback to reset view if no state saved
                         resetView();
                     }
-                    controls.noRotate = false; // Enable rotation
+                    controls.noRotate = false;
+                    controls.update();
+                } else {
+                    // Save current 3D camera state
+                    camera_3d_state.up = camera.up.clone();
+                    camera_3d_state.position = camera.position.clone();
+                    camera_3d_state.quaternion = camera.quaternion.clone();
+                    camera_3d_state.target = controls.target.clone();
+                    controls.noRotate = true;
                 }
-                controls.update();
             });
         }
-    
-        if (colormapSelect) {
-            colormapSelect.addEventListener('change', function() {
-                currentColormap = colormapSelect.value;
-                showNotification(`Colormap changed to ${currentColormap}`, "info");
-                slider_changed = true;
-                updateColorbar(min_gpd, max_gpd, currentColormap);
-            });
-        }
-    
+
         if (resetViewBtn) {
             resetViewBtn.addEventListener('click', resetView);
         }
     
         // Window resize handling
         window.addEventListener('resize', function() {
-            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.aspect = threeContainer.clientWidth / threeContainer.clientHeight;
             camera.updateProjectionMatrix();
-            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+            if (is2DView) {
+                drawHeatmap();
+            }
         });
-        
+    
         // Keyboard shortcuts
         window.addEventListener('keydown', function(event) {
             if (event.ctrlKey && event.key === 'r') {
@@ -775,16 +895,22 @@ function gpd_vis() {
             }
         });
     
-        const numSurfacesInput = document.getElementById('num-surfaces-input');
         if (numSurfacesInput) {
             numSurfacesInput.addEventListener('change', function() {
                 let val = parseInt(numSurfacesInput.value, 10);
                 if (isNaN(val) || val < 1) val = 1;
                 if (val > 50) val = 50;
-                NUM_SURFACES = val;
+                num_surfaces = val;
                 numSurfacesInput.value = val;
                 if (multiSurfaceActive === 0) showMultipleSurfaces(0);
                 if (multiSurfaceActive === 1) showMultipleSurfaces(1);
+            });
+        }
+    
+        if (colormapSelect) {
+            colormapSelect.addEventListener('change', function() {
+                currentColormap = colormapSelect.value;
+                updateColorbar(min_gpd, max_gpd, currentColormap);
             });
         }
     
