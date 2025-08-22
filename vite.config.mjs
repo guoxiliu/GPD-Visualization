@@ -10,7 +10,11 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         {
-          src: 'data/!(gpd_4d).bin',
+          src: 'data/!(gpd*).npy',
+          dest: 'data'
+        },
+        {
+          src: 'data/!(gpd*).bin',
           dest: 'data'
         }
       ],

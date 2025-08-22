@@ -48,7 +48,7 @@ let num_surfaces = 10;
 const playSlider1Btn = document.getElementById('play-slider1');
 const playSlider2Btn = document.getElementById('play-slider2');
 
-let is2DView = true;
+let is2DView = false;
 const toggleViewBtn = document.getElementById('toggle-view-btn');
 const resetViewBtn = document.getElementById('reset-view-btn');
 const colormapSelect = document.getElementById('colormap-select');
@@ -201,9 +201,9 @@ function gpd_vis() {
         let x_label = create_axis_label(labelx, colorx)
         let y_label = create_axis_label(labely, colory)
         let z_label = create_axis_label(labelz, colorz)
-        x_label.position.set(center.x + scale + 0.5, center.y, center.z);
-        y_label.position.set(center.x, center.y + scale + 0.5, center.z);
-        z_label.position.set(center.x, center.y, center.z + scale + 0.5);
+        x_label.position.set(center.x + scale + 0.2, center.y, center.z);
+        y_label.position.set(center.x, center.y + scale + 0.2, center.z);
+        z_label.position.set(center.x, center.y, center.z + scale + 0.2);
         return [x_axis, y_axis, z_axis, x_label, y_label, z_label];
     }
 
@@ -790,12 +790,25 @@ function gpd_vis() {
                 scene = new THREE.Scene();
                 geometry = new THREE.PlaneGeometry(1, 1, arrays1[0].length - 1, arrays1[1].length - 1);
                 let plane = new THREE.Mesh(geometry, material);
-                let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 2.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+                let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 1.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
                 global_axis.forEach(element => { scene.add(element); });
+                
+                // Add a reference plane at Z=0 to show where GPD=0 is
+                let referencePlaneGeometry = new THREE.PlaneGeometry(1, 1);
+                let referencePlaneMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xaaaaaa,
+                    transparent: true,
+                    opacity: 0.5,
+                    side: THREE.DoubleSide
+                });
+                let referencePlane = new THREE.Mesh(referencePlaneGeometry, referencePlaneMaterial);
+                referencePlane.position.set(0.5, 0.5, 0); // Center at the middle of the XY plane
+                scene.add(referencePlane);
+                
                 scene.add(plane);
     
                 axis_scene = new THREE.Scene();
-                let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 8.0, 0.5, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+                let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 5.0, 1.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
                 orient_axis.forEach(element => { axis_scene.add(element); });
     
                 positions = geometry.attributes.position;
@@ -808,7 +821,7 @@ function gpd_vis() {
                     positions.setX(i, axis1_value);
                     positions.setY(i, axis2_value);
                 }
-                controls.target.set(0.5, 0.5, 0); // Focus on the base plane at Z=0
+                controls.target.set(0.5, 0.5, 0);
                 controls.update();
             }
     
@@ -824,7 +837,8 @@ function gpd_vis() {
                     query_index[chosen_vars[1]] = axis2_index;
                     let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
                     let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
-                    positions.setZ(i, gpd_value);
+                    let z_value = gpd_value * 2 - 1;
+                    positions.setZ(i, z_value);
                     let color = evaluate_cmap(gpd_value, currentColormap, false);
                     colors[i * 3] = color[0] / 255.;
                     colors[i * 3 + 1] = color[1] / 255.;
@@ -879,7 +893,7 @@ function gpd_vis() {
             // Reset main camera
             camera.position.set(0.345, -0.597, 0.970);
             camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
-            controls.target.set(0.5, 0.5, 0); // Focus on the base plane at Z=0
+            controls.target.set(0.5, 0.5, 0);
             controls.update();
             
             // Reset axis camera to default orthographic settings
@@ -1013,7 +1027,12 @@ function gpd_vis() {
                     query_index[chosen_vars[1]] = axis2_index;
                     let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
                     let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
-                    surfacePositions.setZ(j, gpd_value);
+                    
+                    // Use scaled actual GPD values (same as main surface)
+                    let gpd_range = max_gpd - min_gpd;
+                    let scale_factor = 2.0 / gpd_range;
+                    let z_value = gpd_raw_value * scale_factor;
+                    surfacePositions.setZ(j, z_value);
                     let color = evaluate_cmap(gpd_value, currentColormap, false);
                     surfaceColors[j * 3] = color[0] / 255.;
                     surfaceColors[j * 3 + 1] = color[1] / 255.;
