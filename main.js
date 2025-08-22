@@ -80,52 +80,6 @@ if (colormapSelect) {
     colormapSelect.value = currentColormap;
 }
 
-function create_axis_label(text, color) {
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.width = 400
-    canvas.height = 400
-    context.font = 'Bold 100px Arial';
-    context.fillStyle = color;
-    context.fillText(text, canvas.width / 2 - 50, canvas.height / 2 + 50);
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture });
-    const sprite = new THREE.Sprite(material);
-    return sprite;
-}
-
-function create_axis_line(start, end, width, color){
-    const geometry = new LineSegmentsGeometry().setPositions([start.x, start.y, start.z, end.x, end.y, end.z])
-    const material = new LineMaterial({
-        color: color,   
-        linewidth: width
-    });
-    return new LineSegments2(geometry, material);
-}
-
-function create_axis(center, width=8.0, scale=0.5, labelx="x", labely="y", labelz="z", colorx = '#ff0000', colory='#00ff00', colorz='#0000ff') {
-    let x_axis = create_axis_line(center, new THREE.Vector3(center.x + scale, center.y, center.z), width, colorx)
-    let y_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y + scale, center.z), width, colory)
-    let z_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y, center.z + scale), width, colorz)
-    let x_label = create_axis_label(labelx, colorx)
-    let y_label = create_axis_label(labely, colory)
-    let z_label = create_axis_label(labelz, colorz)
-    x_label.position.set(center.x + scale + 0.5, center.y, center.z);
-    y_label.position.set(center.x, center.y + scale + 0.5, center.z);
-    z_label.position.set(center.x, center.y, center.z + scale + 0.5);
-    return [x_axis, y_axis, z_axis, x_label, y_label, z_label];
-}
-
-function get_extreme(arr){
-    let maxv = Number.MIN_VALUE;
-    let minv = Number.MAX_VALUE;
-    arr.forEach(val => {
-        maxv = Math.max(maxv, val)
-        minv = Math.min(minv, val)
-    })
-    return [minv, maxv];
-}
-
 function load_array(url) {
     return fetch(url).then(response => {
         if (!response.ok) {
@@ -159,105 +113,6 @@ function load_data_files() {
         results.push(load_file(file.path, file.type));
     }
     return results;
-}
-
-// Notification system
-function showNotification(message, type = 'info') {
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    notification.textContent = message;
-
-    // Use the dedicated notification container
-    const notificationContainer = document.getElementById('notification-container');
-    if (!notificationContainer) return;
-    notificationContainer.appendChild(notification);
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
-}
-
-// Function to update scene info display
-function updateSceneInfo(message) {
-    const sceneInfo = document.getElementById('scene-info');
-    if (sceneInfo) {
-        sceneInfo.textContent = message;
-    }
-}
-
-// Update slider labels to show remaining variables
-function updateSliderLabels() {
-    remaining_vars = [0, 1, 2, 3].filter(i => !chosen_vars.includes(i));
-    document.getElementById('slider1-label').textContent = axis_labels[remaining_vars[0]] + ': ';
-    document.getElementById('slider2-label').textContent = axis_labels[remaining_vars[1]] + ': ';
-}
-
-// Update colorbar min/max labels and gradient for the single colorbar
-function updateColorbar(min, max, colormap) {
-    const labels = colorbarContainer.querySelectorAll('.colorbar-labels');
-    if (labels.length >= 2) {
-        labels[0].textContent = max.toFixed(3);
-        labels[1].textContent = min.toFixed(3);
-    }
-    const colorbar = colorbarContainer.querySelector('.colorbar');
-    if (colorbar) {
-        let stops = [];
-        for (let i = 0; i <= 100; i += 10) {
-            const value = i / 100;
-            let rgb = evaluate_cmap(value, colormap, false);
-            if (!rgb || rgb.length !== 3) {
-                rgb = [255, 255, 255];
-            }
-            stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
-        }
-        colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
-    }
-}
-
-// Move colorbar-container to correct parent on view switch
-function moveColorbarToCurrentView() {
-    if (is2DView) {
-        heatmapContainer.appendChild(colorbarContainer);
-    } else {
-        threeContainer.appendChild(colorbarContainer);
-    }
-}
-
-function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar) {
-    // stop any existing animation
-    if (window[playingFlag]) {
-        window[playingFlag] = false;
-        playBtn.innerHTML = '<i class="fas fa-play"></i>';
-        clearInterval(window[intervalVar]);
-        window[intervalVar] = null;
-        return;
-    }
-
-    window[playingFlag] = true;
-    playBtn.innerHTML = '<i class="fas fa-pause"></i>';
-
-    window[intervalVar] = setInterval(() => {
-        if (!window[playingFlag]) {
-            clearInterval(window[intervalVar]);
-            window[intervalVar] = null;
-            playBtn.innerHTML = '<i class="fas fa-play"></i>';
-            return;
-        }
-
-        let current = control_index[idx];
-        current++;
-        if (current > dataArray.length - 1) {
-            current = 0; // Loop back to the start
-        }
-        control_index[idx] = current;
-        slider_changed = true;
-        slider.noUiSlider.set(current);
-        updateColorbar(min_gpd, max_gpd, currentColormap);
-
-        // Show multiple surfaces if multi-surface mode is active
-        if (multiSurfaceActive === idx) {
-            showMultipleSurfaces(idx);
-        }
-    }, 200);
 }
 
 // --- Data Upload Handling ---
@@ -314,6 +169,155 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function gpd_vis() {
+    // Move utility functions into closure for better organization and data access
+    
+    function create_axis_label(text, color) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 400
+        canvas.height = 400
+        context.font = 'Bold 100px Arial';
+        context.fillStyle = color;
+        context.fillText(text, canvas.width / 2 - 50, canvas.height / 2 + 50);
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.SpriteMaterial({ map: texture });
+        const sprite = new THREE.Sprite(material);
+        return sprite;
+    }
+
+    function create_axis_line(start, end, width, color){
+        const geometry = new LineSegmentsGeometry().setPositions([start.x, start.y, start.z, end.x, end.y, end.z])
+        const material = new LineMaterial({
+            color: color,   
+            linewidth: width
+        });
+        return new LineSegments2(geometry, material);
+    }
+
+    function create_axis(center, width=8.0, scale=0.5, labelx="x", labely="y", labelz="z", colorx = '#ff0000', colory='#00ff00', colorz='#0000ff') {
+        let x_axis = create_axis_line(center, new THREE.Vector3(center.x + scale, center.y, center.z), width, colorx)
+        let y_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y + scale, center.z), width, colory)
+        let z_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y, center.z + scale), width, colorz)
+        let x_label = create_axis_label(labelx, colorx)
+        let y_label = create_axis_label(labely, colory)
+        let z_label = create_axis_label(labelz, colorz)
+        x_label.position.set(center.x + scale + 0.5, center.y, center.z);
+        y_label.position.set(center.x, center.y + scale + 0.5, center.z);
+        z_label.position.set(center.x, center.y, center.z + scale + 0.5);
+        return [x_axis, y_axis, z_axis, x_label, y_label, z_label];
+    }
+
+    function get_extreme(arr){
+        let maxv = Number.MIN_VALUE;
+        let minv = Number.MAX_VALUE;
+        arr.forEach(val => {
+            maxv = Math.max(maxv, val)
+            minv = Math.min(minv, val)
+        })
+        return [minv, maxv];
+    }
+
+    // Notification system
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+
+        // Use the dedicated notification container
+        const notificationContainer = document.getElementById('notification-container');
+        if (!notificationContainer) return;
+        notificationContainer.appendChild(notification);
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
+    }
+
+    // Function to update scene info display
+    function updateSceneInfo(message) {
+        const sceneInfo = document.getElementById('scene-info');
+        if (sceneInfo) {
+            sceneInfo.textContent = message;
+        }
+    }
+
+    // Update slider labels to show remaining variables
+    function updateSliderLabels() {
+        remaining_vars = [0, 1, 2, 3].filter(i => !chosen_vars.includes(i));
+        document.getElementById('slider1-label').textContent = axis_labels[remaining_vars[0]] + ': ';
+        document.getElementById('slider2-label').textContent = axis_labels[remaining_vars[1]] + ': ';
+    }
+
+    // Update colorbar min/max labels and gradient for the single colorbar
+    function updateColorbar(min, max, colormap) {
+        const labels = colorbarContainer.querySelectorAll('.colorbar-labels');
+        if (labels.length >= 2) {
+            labels[0].textContent = max.toFixed(3);
+            labels[1].textContent = min.toFixed(3);
+        }
+        
+        // Clear existing intermediate ticks and labels
+        const existingTicks = colorbarContainer.querySelectorAll('.colorbar-tick, .colorbar-tick-label');
+        existingTicks.forEach(tick => tick.remove());
+        
+        const colorbar = colorbarContainer.querySelector('.colorbar');
+        if (colorbar) {
+            let stops = [];
+            for (let i = 0; i <= 100; i += 10) {
+                const value = i / 100;
+                let rgb = evaluate_cmap(value, colormap, false);
+                if (!rgb || rgb.length !== 3) {
+                    rgb = [255, 255, 255];
+                }
+                stops.push(`rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])}) ${i}%`);
+            }
+            colorbar.style.background = `linear-gradient(to top, ${stops.join(', ')})`;
+            
+            // Add intermediate ticks (excluding min and max which are already handled)
+            const numTicks = 5; // Number of intermediate ticks
+            for (let i = 1; i <= numTicks; i++) {
+                const fraction = i / (numTicks + 1);
+                const value = min + (max - min) * fraction;
+                const position = fraction * 100;
+                
+                // Create tick mark 
+                const tick = document.createElement('div');
+                tick.className = 'colorbar-tick';
+                tick.style.position = 'absolute';
+                tick.style.right = '75%';
+                tick.style.bottom = `${position}%`;
+                tick.style.width = '8px';
+                tick.style.height = '1px';
+                tick.style.backgroundColor = 'white';
+                tick.style.transform = 'translateY(50%)';
+                
+                // Create tick label
+                const tickLabel = document.createElement('div');
+                tickLabel.className = 'colorbar-tick-label';
+                tickLabel.style.position = 'absolute';
+                tickLabel.style.right = '105%';
+                tickLabel.style.bottom = `${position}%`;
+                tickLabel.style.color = 'white';
+                tickLabel.style.fontSize = '10px';
+                tickLabel.style.transform = 'translateY(50%)';
+                tickLabel.style.whiteSpace = 'nowrap';
+                tickLabel.style.textAlign = 'right';
+                tickLabel.textContent = value.toFixed(3);
+                
+                colorbar.appendChild(tick);
+                colorbar.appendChild(tickLabel);
+            }
+        }
+    }
+
+    // Move colorbar-container to correct parent on view switch
+    function moveColorbarToCurrentView() {
+        if (is2DView) {
+            heatmapContainer.appendChild(colorbarContainer);
+        } else {
+            threeContainer.appendChild(colorbarContainer);
+        }
+    }
+
     Promise.all(load_data_files())
     .then(([x, xi, t, Q2, gpd_4d_flat]) => {
         x = new Float64Array(x);
@@ -336,7 +340,7 @@ function gpd_vis() {
     
         console.log("min_gpd:", min_gpd, "max_gpd:", max_gpd);
     
-        // After you set min_gpd and max_gpd in your .then() block, update the colorbar labels:
+        // update the colorbar labels:
         document.querySelectorAll('.colorbar-labels')[0].textContent = `${max_gpd.toFixed(3)}`;
         document.querySelectorAll('.colorbar-labels')[1].textContent = `${min_gpd.toFixed(3)}`;
     
@@ -377,50 +381,172 @@ function gpd_vis() {
             const axis2 = chosen_vars[1];
             const arr1 = x_xi_t_Q2_array[axis1];
             const arr2 = x_xi_t_Q2_array[axis2];
-            // Prepare 2D data slice for D3
+            const targetGridSize = 20;
+            // const targetGridSize = Math.min(arr1.length, arr2.length);
+            
+            // Helper function for linear interpolation
+            function interpolateValue(targetIndex, sourceLength, targetLength) {
+                const ratio = (sourceLength - 1) / (targetLength - 1);
+                const exactIndex = targetIndex * ratio;
+                const lowerIndex = Math.floor(exactIndex);
+                const upperIndex = Math.min(lowerIndex + 1, sourceLength - 1);
+                const fraction = exactIndex - lowerIndex;
+                return { lowerIndex, upperIndex, fraction };
+            }
+            
+            // Prepare 2D data slice for D3 with interpolation
             const slice = [];
-            for (let j = 0; j < arr2.length; j++) {
-                for (let i = 0; i < arr1.length; i++) {
+            for (let j = 0; j < targetGridSize; j++) {
+                for (let i = 0; i < targetGridSize; i++) {
                     let query_index = [0, 0, 0, 0];
-                    query_index[axis1] = i;
-                    query_index[axis2] = j;
-                    query_index[remaining_vars[0]] = control_index[0];
-                    query_index[remaining_vars[1]] = control_index[1];
-                    let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                    
+                    // Handle interpolation for axis1
+                    let axis1_indices;
+                    if (arr1.length === targetGridSize) {
+                        axis1_indices = { lowerIndex: i, upperIndex: i, fraction: 0 };
+                    } else {
+                        axis1_indices = interpolateValue(i, arr1.length, targetGridSize);
+                    }
+                    
+                    // Handle interpolation for axis2
+                    let axis2_indices;
+                    if (arr2.length === targetGridSize) {
+                        axis2_indices = { lowerIndex: j, upperIndex: j, fraction: 0 };
+                    } else {
+                        axis2_indices = interpolateValue(j, arr2.length, targetGridSize);
+                    }
+                    
+                    // Bilinear interpolation for GPD values
+                    let interpolatedValue;
+                    if (axis1_indices.fraction === 0 && axis2_indices.fraction === 0) {
+                        // No interpolation needed
+                        query_index[axis1] = axis1_indices.lowerIndex;
+                        query_index[axis2] = axis2_indices.lowerIndex;
+                        query_index[remaining_vars[0]] = control_index[0];
+                        query_index[remaining_vars[1]] = control_index[1];
+                        interpolatedValue = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                    } else {
+                        // Bilinear interpolation
+                        const values = [];
+                        const indices = [
+                            [axis1_indices.lowerIndex, axis2_indices.lowerIndex],
+                            [axis1_indices.upperIndex, axis2_indices.lowerIndex],
+                            [axis1_indices.lowerIndex, axis2_indices.upperIndex],
+                            [axis1_indices.upperIndex, axis2_indices.upperIndex]
+                        ];
+                        
+                        for (let [idx1, idx2] of indices) {
+                            query_index[axis1] = idx1;
+                            query_index[axis2] = idx2;
+                            query_index[remaining_vars[0]] = control_index[0];
+                            query_index[remaining_vars[1]] = control_index[1];
+                            values.push(gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]));
+                        }
+                        
+                        // Bilinear interpolation formula
+                        const v1 = values[0] * (1 - axis1_indices.fraction) + values[1] * axis1_indices.fraction;
+                        const v2 = values[2] * (1 - axis1_indices.fraction) + values[3] * axis1_indices.fraction;
+                        interpolatedValue = v1 * (1 - axis2_indices.fraction) + v2 * axis2_indices.fraction;
+                    }
+                    
                     slice.push({
                         i: i,
                         j: j,
-                        value: gpd_raw_value
+                        value: interpolatedValue
                     });
                 }
             }
-            // D3 heatmap as grid of squares
+            
+            // Calculate square dimensions
             const margin = {top: 30, right: 50, bottom: 30, left: 30};
-            const width = heatmapContainer.clientWidth - margin.left - margin.right;
-            const height = heatmapContainer.clientHeight - margin.top - margin.bottom;
+            const containerWidth = heatmapContainer.clientWidth - margin.left - margin.right;
+            const containerHeight = heatmapContainer.clientHeight - margin.top - margin.bottom;
+            const squareSize = Math.min(containerWidth, containerHeight);
+            
+            // Calculate horizontal centering offset
+            const totalSvgWidth = heatmapContainer.clientWidth;
+            const squareWithMargins = squareSize + margin.left + margin.right;
+            const horizontalOffset = (totalSvgWidth - squareWithMargins) / 2;
+            
             const svg = d3.select(heatmapContainer)
                 .append('svg')
-                .attr('width', width + margin.left + margin.right)
-                .attr('height', height + margin.top + margin.bottom)
+                .attr('width', totalSvgWidth)
+                .attr('height', squareSize + margin.top + margin.bottom)
+                .style('display', 'block')
                 .append('g')
-                .attr('transform', `translate(${margin.left},${margin.top})`);
-            // Build X scales and axis
+                .attr('transform', `translate(${margin.left + horizontalOffset},${margin.top})`);
+            
+            // Create tooltip
+            const tooltip = d3.select(heatmapContainer)
+                .append('div')
+                .style('opacity', 0)
+                .attr('class', 'heatmap-tooltip')
+                .style('position', 'absolute')
+                .style('background-color', 'rgba(0, 0, 0, 0.8)')
+                .style('color', 'white')
+                .style('border', 'solid')
+                .style('border-width', '1px')
+                .style('border-color', '#666')
+                .style('border-radius', '5px')
+                .style('padding', '8px')
+                .style('font-size', '12px')
+                .style('pointer-events', 'none')
+                .style('z-index', '1000');
+            
+            // Build X and Y scales for square grid
             const x = d3.scaleBand()
-                .range([0, width])
-                .domain(d3.range(arr1.length))
+                .range([0, squareSize])
+                .domain(d3.range(targetGridSize))
                 .padding(0);
             
-            // svg.append('g')
-            //     .attr('transform', `translate(0, ${height})`)
-                // .call(d3.axisBottom(x))
-            
-            // Build Y scales and axis
             const y = d3.scaleBand()
-                .range([height, 0])
-                .domain(d3.range(arr2.length))
+                .range([squareSize, 0])
+                .domain(d3.range(targetGridSize))
                 .padding(0);
-            // svg.append('g')
-                // .call(d3.axisLeft(y))
+            
+            // Tooltip event handlers
+            const mouseover = function(event, d) {
+                tooltip.style('opacity', 1);
+            };
+            
+            const mousemove = function(event, d) {
+                const containerRect = heatmapContainer.getBoundingClientRect();
+                const mouseX = event.clientX - containerRect.left;
+                const mouseY = event.clientY - containerRect.top;
+                const tooltipOffset = 10;
+                
+                // Set initial position close to mouse
+                let tooltipX = mouseX + tooltipOffset;
+                let tooltipY = mouseY + tooltipOffset;
+                
+                // Get tooltip dimensions (temporarily show it to measure)
+                tooltip.style('opacity', 1)
+                    .html(`<strong>GPD Value:</strong> ${d.value.toFixed(6)}`);
+                
+                const tooltipNode = tooltip.node();
+                const tooltipWidth = tooltipNode.offsetWidth;
+                const tooltipHeight = tooltipNode.offsetHeight;
+                
+                // Edge detection - adjust position if tooltip would go off-screen
+                if (tooltipX + tooltipWidth > heatmapContainer.clientWidth) {
+                    tooltipX = mouseX - tooltipWidth - tooltipOffset; // Show to the left of cursor
+                }
+                if (tooltipY + tooltipHeight > heatmapContainer.clientHeight) {
+                    tooltipY = mouseY - tooltipHeight - tooltipOffset; // Show above cursor
+                }
+                
+                // Ensure tooltip doesn't go beyond container bounds
+                tooltipX = Math.max(0, Math.min(tooltipX, heatmapContainer.clientWidth - tooltipWidth));
+                tooltipY = Math.max(0, Math.min(tooltipY, heatmapContainer.clientHeight - tooltipHeight));
+                
+                tooltip
+                    .style('left', tooltipX + 'px')
+                    .style('top', tooltipY + 'px');
+            };
+            
+            const mouseleave = function(event, d) {
+                tooltip.style('opacity', 0);
+            };
             
             // Draw squares
             svg.selectAll('rect')
@@ -435,24 +561,111 @@ function gpd_vis() {
                     norm = Math.max(0, Math.min(1, norm));
                     let rgb = evaluate_cmap(norm, currentColormap, false);
                     return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-                });
+                })
+                .style('stroke', 'none')  // Explicitly remove any stroke
+                .style('stroke-width', 0)  // Ensure no stroke width
+                .style('cursor', 'pointer')
+                .on('mouseover', mouseover)
+                .on('mousemove', mousemove)
+                .on('mouseleave', mouseleave);
+            
+            // Add tick marks and labels for X axis
+            const numXTicks = Math.min(5, targetGridSize);
+            const xTickIndices = d3.range(0, targetGridSize, Math.max(1, Math.floor(targetGridSize / (numXTicks - 1))));
+            if (xTickIndices[xTickIndices.length - 1] !== targetGridSize - 1) {
+                xTickIndices.push(targetGridSize - 1);
+            }
+            
+            xTickIndices.forEach(tickIndex => {
+                // Calculate the actual interpolated data value for this tick
+                let actualValue;
+                if (arr1.length === targetGridSize) {
+                    actualValue = arr1[tickIndex];
+                } else {
+                    const interpolationData = interpolateValue(tickIndex, targetGridSize, arr1.length);
+                    const lowerValue = arr1[interpolationData.lowerIndex];
+                    const upperValue = arr1[interpolationData.upperIndex];
+                    actualValue = lowerValue * (1 - interpolationData.fraction) + upperValue * interpolationData.fraction;
+                }
+                
+                // Draw tick mark
+                svg.append('line')
+                    .attr('x1', x(tickIndex) + x.bandwidth() / 2)
+                    .attr('y1', squareSize)
+                    .attr('x2', x(tickIndex) + x.bandwidth() / 2)
+                    .attr('y2', squareSize + 5)
+                    .attr('stroke', 'white')
+                    .attr('stroke-width', 1);
+                
+                // Draw tick label
+                svg.append('text')
+                    .attr('x', x(tickIndex) + x.bandwidth() / 2)
+                    .attr('y', squareSize + 15)
+                    .attr('text-anchor', 'middle')
+                    .attr('font-size', '10px')
+                    .attr('fill', 'white')
+                    .text(actualValue.toFixed(3));
+            });
+            
+            // Add tick marks and labels for Y axis
+            const numYTicks = Math.min(5, targetGridSize);
+            const yTickIndices = d3.range(0, targetGridSize, Math.max(1, Math.floor(targetGridSize / (numYTicks - 1))));
+            if (yTickIndices[yTickIndices.length - 1] !== targetGridSize - 1) {
+                yTickIndices.push(targetGridSize - 1);
+            }
+            
+            yTickIndices.forEach(tickIndex => {
+                // Calculate the actual interpolated data value for this tick
+                let actualValue;
+                if (arr2.length === targetGridSize) {
+                    actualValue = arr2[tickIndex];
+                } else {
+                    const interpolationData = interpolateValue(tickIndex, targetGridSize, arr2.length);
+                    const lowerValue = arr2[interpolationData.lowerIndex];
+                    const upperValue = arr2[interpolationData.upperIndex];
+                    actualValue = lowerValue * (1 - interpolationData.fraction) + upperValue * interpolationData.fraction;
+                }
+                
+                // Draw tick mark
+                svg.append('line')
+                    .attr('x1', -5)
+                    .attr('y1', y(tickIndex) + y.bandwidth() / 2)
+                    .attr('x2', 0)
+                    .attr('y2', y(tickIndex) + y.bandwidth() / 2)
+                    .attr('stroke', 'white')
+                    .attr('stroke-width', 1);
+                
+                // Draw tick label
+                svg.append('text')
+                    .attr('x', -10)
+                    .attr('y', y(tickIndex) + y.bandwidth() / 2)
+                    .attr('text-anchor', 'end')
+                    .attr('dominant-baseline', 'middle')
+                    .attr('font-size', '10px')
+                    .attr('fill', 'white')
+                    .text(actualValue.toFixed(3));
+            });
             
             // Axis labels
             svg.append('text')
-                .attr('x', width/2)
-                .attr('y', height + 15)
+                .attr('x', squareSize/2)
+                .attr('y', squareSize + 25)
                 .attr('text-anchor', 'middle')
                 .attr('font-size', '16px')
                 .attr('fill', 'white')
                 .text(axis_labels[axis1]);
             svg.append('text')
                 .attr('transform', 'rotate(-90)')
-                .attr('x', -height/2)
-                .attr('y', -margin.left + 20)
+                .attr('x', -squareSize/2)
+                .attr('y', -margin.left + 5)
                 .attr('text-anchor', 'middle')
                 .attr('font-size', '16px')
                 .attr('fill', 'white')
                 .text(axis_labels[axis2]);
+
+            if (!heatmapContainer.contains(colorbarContainer)) {
+                heatmapContainer.appendChild(colorbarContainer);
+            }
         }
 
         // Toggle between Three.js and D3 heatmap
@@ -472,8 +685,76 @@ function gpd_vis() {
                 if (multiSurface1Btn) multiSurface1Btn.disabled = false;
                 if (multiSurface2Btn) multiSurface2Btn.disabled = false;
                 if (numSurfacesInput) numSurfacesInput.disabled = false;
+                
+                // Force resize the renderer after switching to 3D view
+                setTimeout(() => {
+                    if (camera && renderer) {
+                        camera.aspect = threeContainer.clientWidth / threeContainer.clientHeight;
+                        camera.updateProjectionMatrix();
+                        renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+                    }
+                }, 0);
             }
             moveColorbarToCurrentView();
+        }
+
+        function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar) {
+            // stop any existing animation
+            if (window[playingFlag]) {
+                window[playingFlag] = false;
+                playBtn.innerHTML = '<i class="fas fa-play"></i>';
+                clearInterval(window[intervalVar]);
+                window[intervalVar] = null;
+                return;
+            }
+
+            window[playingFlag] = true;
+            playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+
+            window[intervalVar] = setInterval(() => {
+                if (!window[playingFlag]) {
+                    clearInterval(window[intervalVar]);
+                    window[intervalVar] = null;
+                    playBtn.innerHTML = '<i class="fas fa-play"></i>';
+                    return;
+                }
+
+                let current = control_index[idx];
+                current++;
+                if (current > dataArray.length - 1) {
+                    current = 0; // Loop back to the start
+                }
+                control_index[idx] = current;
+                slider_changed = true;
+                slider.noUiSlider.set(current);
+                updateColorbar(min_gpd, max_gpd, currentColormap);
+
+                // Show multiple surfaces if multi-surface mode is active
+                if (multiSurfaceActive === idx) {
+                    showMultipleSurfaces(idx);
+                }
+                
+                // Update 2D heatmap if in 2D view mode
+                if (is2DView) {
+                    drawHeatmap();
+                }
+            }, 200);
+        }
+
+        // Standalone function to render the 3D scene
+        function render3DScene() {
+            // Main scene rendering
+            renderer.setViewport(0, 0, threeContainer.clientWidth, threeContainer.clientHeight);
+            controls.update();
+            renderer.clear();
+            renderer.render(scene, camera);
+    
+            // Axis orientation guide rendering
+            axis_camera.quaternion.copy(camera.quaternion);
+            renderer.clearDepth();  
+            renderer.autoClear = false;
+            renderer.setViewport(0, 0, 300, 300);
+            renderer.render(axis_scene, axis_camera);
         }
 
         function animate() {
@@ -527,7 +808,7 @@ function gpd_vis() {
                     positions.setX(i, axis1_value);
                     positions.setY(i, axis2_value);
                 }
-                controls.target.set(0.5, 0.5, 0.5);
+                controls.target.set(0.5, 0.5, 0); // Focus on the base plane at Z=0
                 controls.update();
             }
     
@@ -543,7 +824,7 @@ function gpd_vis() {
                     query_index[chosen_vars[1]] = axis2_index;
                     let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
                     let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
-                    positions.setZ(i, is2DView ? 0 : gpd_value);
+                    positions.setZ(i, gpd_value);
                     let color = evaluate_cmap(gpd_value, currentColormap, false);
                     colors[i * 3] = color[0] / 255.;
                     colors[i * 3 + 1] = color[1] / 255.;
@@ -554,28 +835,19 @@ function gpd_vis() {
                 geometry.computeVertexNormals();
             }
     
-            renderer.setViewport(0, 0, threeContainer.clientWidth, threeContainer.clientHeight);
-            controls.update();
-            renderer.clear();
-            renderer.render(scene, camera);
-    
-            axis_camera.quaternion.copy(camera.quaternion);
-    
-            renderer.clearDepth();  
-            renderer.autoClear = false;
-            renderer.setViewport(0, 0, 300, 300);
-            renderer.render(axis_scene, axis_camera);
+            render3DScene();
         }
         renderer.setAnimationLoop( animate );
     
-        // Calculate middle indices for sliders
+        // Initialize arrays2 for slider setup
+        arrays2 = [x_xi_t_Q2_array[remaining_vars[0]], x_xi_t_Q2_array[remaining_vars[1]]];
         const middle0 = Math.floor(arrays2[0].length / 2);
         const middle1 = Math.floor(arrays2[1].length / 2);
         control_index[0] = middle0;
         control_index[1] = middle1;
 
         noUiSlider.create(slider1, {
-            start: [0],
+            start: [middle0],
             tooltips: { 
                 to: function (value) { return arrays2[0][Math.round(value)]; } 
             },
@@ -583,11 +855,11 @@ function gpd_vis() {
             range: {
                 min: 0,
                 max: arrays2[0].length - 1
-            },
+            },  
         });
 
         noUiSlider.create(slider2, {
-            start: [0],
+            start: [middle1],
             tooltips: { 
                 to: function (value) { return arrays2[1][Math.round(value)]; } 
             },
@@ -597,10 +869,6 @@ function gpd_vis() {
                 max: arrays2[1].length - 1
             },
         });
-
-        // Ensure UI matches initial values
-        slider1.noUiSlider.set(middle0);
-        slider2.noUiSlider.set(middle1);
     
         updateSliderLabels();
         updateColorbar(min_gpd, max_gpd, currentColormap);
@@ -611,7 +879,7 @@ function gpd_vis() {
             // Reset main camera
             camera.position.set(0.345, -0.597, 0.970);
             camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
-            controls.target.set(0.5, 0.5, 0.5);
+            controls.target.set(0.5, 0.5, 0); // Focus on the base plane at Z=0
             controls.update();
             
             // Reset axis camera to default orthographic settings
@@ -640,8 +908,6 @@ function gpd_vis() {
                 // Update view depending on current mode
                 if (is2DView) {
                     drawHeatmap();
-                } else {
-                    // 3D view: animate() will update scene on next frame
                 }
             });
             // Stop animation if user interacts with slider manually
@@ -666,8 +932,6 @@ function gpd_vis() {
                 // Update view depending on current mode
                 if (is2DView) {
                     drawHeatmap();
-                } else {
-                    // 3D view: animate() will update scene on next frame
                 }
             });
             slider2.noUiSlider.on('start', function() {
@@ -749,7 +1013,7 @@ function gpd_vis() {
                     query_index[chosen_vars[1]] = axis2_index;
                     let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
                     let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
-                    surfacePositions.setZ(j, is2DView ? 0 : gpd_value);
+                    surfacePositions.setZ(j, gpd_value);
                     let color = evaluate_cmap(gpd_value, currentColormap, false);
                     surfaceColors[j * 3] = color[0] / 255.;
                     surfaceColors[j * 3 + 1] = color[1] / 255.;
@@ -814,9 +1078,11 @@ function gpd_vis() {
                 chosen_vars[0] = selectedValue;
                 updated_axis = true;
                 slider_changed = true;
-                control_index = [0, 0];
-                slider1.noUiSlider.set(0);
-                slider2.noUiSlider.set(0);
+                const newMiddle0 = Math.floor(arrays2[0].length / 2);
+                const newMiddle1 = Math.floor(arrays2[1].length / 2);
+                control_index = [newMiddle0, newMiddle1];
+                slider1.noUiSlider.set(newMiddle0);
+                slider2.noUiSlider.set(newMiddle1);
                 updateSliderLabels();
                 showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
                 updateColorbar(min_gpd, max_gpd, currentColormap);
@@ -833,10 +1099,12 @@ function gpd_vis() {
                 chosen_vars[1] = selectedValue;
                 updated_axis = true;
                 slider_changed = true;
-                control_index = [0, 0];
-                slider1.noUiSlider.set(0);
-                slider2.noUiSlider.set(0);
-                updateSliderLabels();
+                const newMiddle0 = Math.floor(arrays2[0].length / 2);
+                const newMiddle1 = Math.floor(arrays2[1].length / 2);
+                control_index = [newMiddle0, newMiddle1];
+                slider1.noUiSlider.set(newMiddle0);
+                slider2.noUiSlider.set(newMiddle1);
+                updateSliderLabels();                                           
                 showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
                 updateColorbar(min_gpd, max_gpd, currentColormap);
             });
@@ -911,9 +1179,11 @@ function gpd_vis() {
             colormapSelect.addEventListener('change', function() {
                 currentColormap = colormapSelect.value;
                 updateColorbar(min_gpd, max_gpd, currentColormap);
+                if (is2DView) {
+                    drawHeatmap();
+                }
             });
         }
-    
     })
     .catch(error => {
         loading_overlay.style.display = 'none';
