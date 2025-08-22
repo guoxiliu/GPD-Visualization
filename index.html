@@ -4,9 +4,11 @@
     <meta charset="utf-8">
     <title>GPD Visualization</title>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    
+
+    <link rel="icon" type="image/svg+xml" href="/GPD-Visualization/assets/favicon-DvudWjtq.svg">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/nouislider@15.6.1/dist/nouislider.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" crossorigin="anonymous" />
     <style>
         .colorbar {
             width: 20px;
@@ -16,7 +18,7 @@
         }
         .colorbar-labels {
             font-size: 0.8em;
-            color: #555;
+            color: #fff;
             text-align: center;
         }
         #loading-overlay {
@@ -69,14 +71,96 @@
             background: #5a6fd8;
             transform: scale(1.2);
         }
+        /* Colorbar zero marker styles */
+        #colorbar-zero-marker {
+            position: absolute;
+            left: -8px;
+            width: 36px;
+            height: 0;
+            border-top: 2px dashed #fff;
+            opacity: 0.8;
+            pointer-events: none;
+            z-index: 2;
+        }
+        #colorbar-zero-marker .zero-label {
+            position: absolute;
+            left: 22px;
+            top: -10px;
+            font-size: 0.8em;
+            color: #fff;
+            text-shadow: 0 0 2px #000;
+        }
+        .notification {
+            margin-bottom: 8px;
+            padding: 15px 20px;
+            border-radius: 5px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            text-align: center;
+            min-width: 200px;
+            max-width: 300px;
+            pointer-events: none;
+        }
+        .notification.info {
+            background-color: #2196F3;
+        }
+        .notification.success {
+            background-color: #4CAF50;
+        }
+        .notification.warning {
+            background-color: #FF9800;
+        }
+        /* Ensure containers take full available space */
+        #three-container, #heatmap-container {
+            min-height: 400px;
+            height: 100%;
+        }
     </style>
-  <script type="module" crossorigin src="/assets/index-Bn9ms5TA.js"></script>
+  <script type="module" crossorigin src="/GPD-Visualization/assets/index-ClrolwvK.js"></script>
 </head>
 
 <body class="d-flex flex-column vh-100">
+    <!-- Data upload module -->
+    <div id="data-upload-overlay" class="position-fixed top-0 start-0 w-100 h-100 bg-light" style="z-index:10000; overflow-y: auto;">
+        <div class="modal-dialog" style="max-width: 600px; width: 100%;">
+            <div class="modal-content p-4">
+                <h2 class="my-3 text-center text-primary"><i class="fas fa-upload me-2"></i>Upload Data Files</h2>
+                <p class="text-muted text-center mb-3" style="font-size:1.05em;">Select your own data files to explore, or skip to use the default data arrays. (Binary or NumPy file format, e.g., .bin or .npy)</p>
+                <form id="data-upload-form">
+                    <div class="mb-2">
+                        <label class="form-label">x values (e.g., x.bin)</label>
+                        <input type="file" class="form-control" id="file-x" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">x<sub>i</sub> values (e.g., xi.bin)</label>
+                        <input type="file" class="form-control" id="file-xi" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">t values (e.g., t.bin)</label>
+                        <input type="file" class="form-control" id="file-t" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Q<sup>2</sup> values (e.g., Q2.bin)</label>
+                        <input type="file" class="form-control" id="file-Q2" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">GPD data (e.g., gpd_4d.bin)</label>
+                        <input type="file" class="form-control" id="file-gpd4d" required>
+                    </div>
+                    <div class="d-flex justify-content-between mt-3">
+                        <button type="button" class="btn btn-outline-secondary" id="skip-upload-btn">Skip (use default)</button>
+                        <button type="submit" class="btn btn-primary">Load Data</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <div class="bg-primary text-white text-center py-4 shadow">
         <h1 class="mb-0">GPD Visualization</h1>
-        <div class="fs-5 opacity-75">Yansong Yu, Guoxi Liu</div>
+        <div class="fs-5 opacity-75">Guoxi Liu</div>
     </div>
     <div id="loading-overlay">
         <div class="spinner"></div>
@@ -88,7 +172,7 @@
                 <div class="col-lg-4">
                     <div class="card py-2 shadow h-100 d-flex flex-column" style="position: relative;">
                         <div class="card-body flex-grow-1">
-                            <h3 class="card-title border-bottom pb-2 text-primary">⚙️ Settings</h3>
+                            <h3 class="card-title border-bottom pb-2 text-primary"><i class="fas fa-cogs me-2"></i>Settings</h3>
                             <div class="mb-4">
                                 <label for="dropdown1" class="form-label fw-semibold">Primary Axis</label>
                                 <select id="dropdown1" class="form-select">
@@ -110,18 +194,24 @@
                             <div class="pt-4 mb-4">
                                 <div class="d-flex align-items-center mb-2 pb-4">
                                     <span id="slider1-label" class="me-2" style="min-width: 40px;">Value:</span>
-                                    <div id="slider_1" class="flex-grow-1 me-2"></div>
-                                    <button id="play-slider1" class="btn btn-outline-secondary btn-sm ms-2" title="Play Animation" style="font-size: 1.2em;">▶️</button>
+                                    <div id="slider1" class="flex-grow-1 me-2"></div>
+                                    <button id="play-slider1" class="btn btn-outline-secondary btn-sm ms-2" title="Play Animation" style="font-size: 1em;"><i class="fas fa-play"></i></button>
+                                    <button id="multi-surface1" class="btn btn-outline-secondary btn-sm ms-2" title="Show Multiple Surfaces" style="font-size: 1em;"><i class="fas fa-layer-group"></i></button>
                                 </div>
                                 <div class="d-flex align-items-center pt-2">
                                     <span id="slider2-label" class="me-2" style="min-width: 40px;">Value:</span>
-                                    <div id="slider_2" class="flex-grow-1 me-2"></div>
-                                    <button id="play-slider2" class="btn btn-outline-secondary btn-sm ms-2" title="Play Animation" style="font-size: 1.2em;">▶️</button>
+                                    <div id="slider2" class="flex-grow-1 me-2"></div>
+                                    <button id="play-slider2" class="btn btn-outline-secondary btn-sm ms-2" title="Play Animation" style="font-size: 1em;"><i class="fas fa-play"></i></button>
+                                    <button id="multi-surface2" class="btn btn-outline-secondary btn-sm ms-2" title="Show Multiple Surfaces" style="font-size: 1em;"><i class="fas fa-layer-group"></i></button>
+                                </div>
+                                <div class="d-flex align-items-center mt-3">
+                                    <label for="num-surfaces-input" class="form-label mb-0 me-1"># Surfaces:</label>
+                                    <input id="num-surfaces-input" type="number" min="1" max="50" value="10" class="form-control form-control-ms w-auto me-2" />
                                 </div>
                             </div>
                             <div class="card">
                                 <div class="card-body">
-                                    <h4 class="card-title text-primary">📚 Reference</h4>
+                                    <h4 class="card-title text-primary"><i class="fas fa-book me-2"></i>Reference</h4>
                                     <ol class="mb-0">
                                         <li>S. V. Goloskokov and P. Kroll, "The role of the quark and gluon GPDs in hard vector-meson electroproduction", <em>The European Physical Journal C</em>, vol. 53, pp. 367–384, 2008.</li>
                                     </ol>
@@ -129,7 +219,7 @@
                             </div>
                         </div>
                         <div class="card-footer bg-transparent border-0">
-                            <button class="help-button" data-bs-toggle="modal" data-bs-target="#helpModal">?</button>
+                            <button class="help-button" data-bs-toggle="modal" data-bs-target="#helpModal"><i class="fas fa-question"></i></button>
                         </div>
                         <!-- Notification container -->
                         <div id="notification-container" style="position: absolute; right: 20px; bottom: 20px; z-index: 10001;"></div>
@@ -138,36 +228,52 @@
                 <div class="col-lg-8 h-100">
                     <div class="d-flex flex-column h-100">
                         <!-- Scene Controls Panel -->
-                        <div class="bg-light border rounded-top p-2 d-flex justify-content-between align-items-center">
+                        <div class="bg-light border rounded-top p-2">
+                            <!-- First Row: View Controls and Status -->
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="d-flex align-items-center">
+                                    <span class="text-muted mx-2 fw-semibold">View Controls</span>
+                                    <button id="toggle-view-btn" class="btn btn-outline-primary btn-sm ms-2">
+                                    </button>
+                                    <button id="reset-view-btn" class="btn btn-outline-secondary btn-sm ms-2">
+                                        <i class="fas fa-rotate-right me-1"></i> Reset View
+                                    </button>
+                                </div>
+                                <div class="text-muted small me-2">
+                                    <span id="scene-info">Ready</span>
+                                </div>
+                            </div>
+                            <!-- Second Row: Colormap Controls -->
                             <div class="d-flex align-items-center">
-                                <span class="text-muted mx-2 fw-semibold">View Controls</span>
-                                <button id="toggle-view-btn" class="btn btn-outline-primary btn-sm ms-2">
-                                    🗺️ 2D Heatmap
-                                </button>
-                                <button id="reset-view-btn" class="btn btn-outline-secondary btn-sm ms-2">
-                                    🔄 Reset View
-                                </button>
-                                <label for="colormap-select" class="form-label mb-0 ms-3 me-1">Colormap:</label>
-                                <select id="colormap-select" class="form-select form-select-sm w-auto me-2">
-                                    <option value="cividis">Cividis</option>
-                                    <option value="inferno">Inferno</option>
-                                    <option value="magma">Magma</option>
-                                    <option value="rainbow">Rainbow</option>
-                                    <option value="turbo">Turbo</option>
-                                    <option value="viridis">Viridis</option>
-                                </select>
+                                <span class="text-muted mx-2 fw-semibold">Colormap</span>
+                                <div id="single-colormap-controls" class="align-items-center" style="display: flex;">
+                                    <select id="colormap-select" class="form-select form-select-sm w-auto me-2">
+                                        <!-- Diverging colormaps only -->
+                                        <option value="coolwarm">Coolwarm</option>
+                                        <option value="RdBu">RdBu</option>
+                                        <option value="Spectral">Spectral</option>
+                                        <option value="PiYG">PiYG</option>
+                                        <option value="PRGn">PRGn</option>
+                                        <option value="BrBG">BrBG</option>
+                                        <option value="PuOr">PuOr</option>
+                                        <option value="RdGy">RdGy</option>
+                                        <option value="RdYlBu">RdYlBu</option>
+                                        <option value="RdYlGn">RdYlGn</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div class="text-muted small me-2">
-                                <span id="scene-info">Ready</span>
-                            </div>
+                        </div>
+                        <!-- Shared Colorbar Component -->
+                        <div id="colorbar-container" class="colorbar-container position-absolute top-0 end-0 m-2 d-flex flex-column align-items-center" style="z-index: 20;">
+                            <div class="colorbar-labels">Max</div>
+                            <div class="colorbar"></div>
+                            <div class="colorbar-labels">Min</div>
                         </div>
                         <!-- Three.js Container -->
                         <div id="three-container" class="bg-white rounded-bottm shadow position-relative flex-grow-1">
-                            <div class="colorbar-container position-absolute top-0 end-0 m-2 d-flex flex-column align-items-center">
-                                <div class="colorbar-labels">Max</div>
-                                <div class="colorbar"></div>
-                                <div class="colorbar-labels">Min</div>
-                            </div>
+                        </div>
+                        <!-- D3 Heatmap Container -->
+                        <div id="heatmap-container" class="rounded-bottom shadow position-relative flex-grow-1" style="background: #52576e;">
                         </div>
                     </div>
                 </div>
@@ -180,7 +286,7 @@
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
-            <h2 class="modal-title" id="helpModalLabel">How to Use</h2>
+            <h2 class="modal-title" id="helpModalLabel"><i class="fas fa-circle-question me-2"></i>How to Use</h2>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body">
