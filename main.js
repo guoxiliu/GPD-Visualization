@@ -11,7 +11,7 @@ import * as d3 from 'd3';
 
 const axis_labels = [
     'x',
-    'x\u1d62', // unicode subscript i
+    'ξ',
     't',
     'Q\u00b2' // unicode superscript 2
 ];
@@ -20,13 +20,11 @@ let remaining_vars = [0, 2];    // x, t
 let control_index = [0, 0];
 let dataFiles = [
     { name: "x values (x.npy)", path: "data/x.npy", key: 'x', type: 'npy' },
-    { name: "xi values (xi.npy)", path: "data/xi.npy", key: 'xi', type: 'npy' },
+    { name: "ξ values (xi.npy)", path: "data/xi.npy", key: 'xi', type: 'npy' },
     { name: "t values (t.npy)", path: "data/t.npy", key: 't', type: 'npy' },
     { name: "Q² values (Q2.npy)", path: "data/Q2.npy", key: 'Q2', type: 'npy' },
     { name: "GPD data (gpd_4d.npy)", path: "data/gpd_4d.npy", key: 'gpd_4d', type: 'npy' },
 ];
-let max_gpd = Number.MIN_VALUE;
-let min_gpd = Number.MAX_VALUE;
 let multiSurfaceActive = null; // null, 0, or 1
 let slider_changed = true;
 let updated_axis = true;
@@ -80,54 +78,35 @@ if (colormapSelect) {
     colormapSelect.value = currentColormap;
 }
 
-function load_array(url) {
-    return fetch(url).then(response => {
-        if (!response.ok) {
-            throw new Error(`Failed to load ${url}, status: ${response.status}`);
-        }
-        return response.arrayBuffer();
-    });
-}
+const bgDropdownMenu = document.getElementById('bg-dropdown-menu');
+const bgDropdownToggle = document.getElementById('bg-dropdown-toggle');
+let currentBg = '#52576e';
 
-function load_data_files() {
-    const loadingText = document.querySelector('#loading-overlay .loading-text');
-    function load_file(path, type) {
-        if (path) {
-            const npy = new npyjs();
-            if (type === 'npy') {
-                return npy.load(path).then(obj => {
-                    return new Float64Array(Array.from(obj.data));
-                });
-            }
-            else {
-                return load_array(path);
-            }
-        }
-    }
-
-    const results = [];
-    for (const file of dataFiles) {
-        if (loadingText) {
-            loadingText.textContent = `Loading ${file.name}...`;
-        }
-        results.push(load_file(file.path, file.type));
-    }
-    return results;
+// helper to update custom dropdown toggle label and swatch
+function updateBgToggle(color, label) {
+    if (!bgDropdownToggle) return;
+    const swatch = bgDropdownToggle.querySelector('.bg-swatch');
+    const text = bgDropdownToggle.querySelector('span.ms-2');
+    if (swatch) swatch.style.background = color;
+    if (text) text.textContent = label;
 }
 
 // --- Data Upload Handling ---
 window.addEventListener('DOMContentLoaded', () => {
+    document.body.style.overflow = 'hidden';
     const upload_form = document.getElementById('data-upload-form');
     const skipBtn = document.getElementById('skip-upload-btn');
 
     skipBtn.addEventListener('click', () => {
         upload_overlay.style.display = 'none';
+        document.body.style.overflow = '';
         gpd_vis();
     });
 
     upload_form.addEventListener('submit', async (e) => {
         e.preventDefault();
         upload_overlay.style.display = 'none';
+        document.body.style.overflow = '';
         const xFile = document.getElementById('file-x').files[0];
         const xiFile = document.getElementById('file-xi').files[0];
         const tFile = document.getElementById('file-t').files[0];
@@ -166,27 +145,96 @@ window.addEventListener('DOMContentLoaded', () => {
 
         gpd_vis();
     });
+
+    // Ensure background selectors are populated after DOM is ready as well
+    if (heatmapContainer) {
+        heatmapContainer.style.background = currentBg;
+    }
 });
 
+function load_array(url) {
+    return fetch(url).then(response => {
+        if (!response.ok) {
+            throw new Error(`Failed to load ${url}, status: ${response.status}`);
+        }
+        return response.arrayBuffer();
+    });
+}
+
+function load_data_files() {
+    const loadingText = document.querySelector('#loading-overlay .loading-text');
+    function load_file(path, type) {
+        if (path) {
+            const npy = new npyjs();
+            if (type === 'npy') {
+                return npy.load(path).then(obj => {
+                    return new Float64Array(Array.from(obj.data));
+                });
+            }
+            else {
+                return load_array(path);
+            }
+        }
+    }
+
+    const results = [];
+    for (const file of dataFiles) {
+        if (loadingText) {
+            loadingText.textContent = `Loading ${file.name}...`;
+        }
+        results.push(load_file(file.path, file.type));
+    }
+    return results;
+}
+
 function gpd_vis() {
-    // Move utility functions into closure for better organization and data access
-    
+    let renderer, scene, min_gpd = Number.MAX_VALUE, max_gpd = Number.MIN_VALUE;
+    let baseColor = 'white';
+
+    function applyBackground(color) {
+        currentBg = color;
+        if (renderer) renderer.setClearColor(color);
+        if (heatmapContainer) heatmapContainer.style.background = color;
+        // Set text color for heatmap and colorbar labels
+        const isWhite = color.toLowerCase() === '#f8fafc' || color.toLowerCase().includes('white');
+        baseColor = isWhite ? 'black' : 'white';
+        if (heatmapContainer) {
+            const svg = heatmapContainer.querySelector('svg');
+            if (svg) {
+                svg.querySelectorAll('text').forEach(el => el.style.fill = baseColor);
+                svg.querySelectorAll('line').forEach(el => el.style.stroke = baseColor);
+            }
+        }
+        if (colorbarContainer) {
+            colorbarContainer.querySelectorAll('.colorbar-labels, .colorbar-tick-label').forEach(el => el.style.color = baseColor);
+            colorbarContainer.querySelectorAll('.colorbar-tick').forEach(el => el.style.backgroundColor = baseColor);
+        }
+        if (scene) {
+            addZAxisTicks(scene, min_gpd, max_gpd);
+        }
+    }
+
     function create_axis_label(text, color) {
         const canvas = document.createElement('canvas');
+        const size = 512; // higher resolution for crisp text
+        canvas.width = size;
+        canvas.height = size;
         const context = canvas.getContext('2d');
-        canvas.width = 400
-        canvas.height = 400
-        context.font = 'Bold 100px Arial';
+        context.clearRect(0, 0, size, size);
+        context.font = 'bold 200px Arial';
         context.fillStyle = color;
-        context.fillText(text, canvas.width / 2 - 50, canvas.height / 2 + 50);
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(text, size / 2, size / 2);
         const texture = new THREE.CanvasTexture(canvas);
-        const material = new THREE.SpriteMaterial({ map: texture });
+        texture.needsUpdate = true;
+        const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
         const sprite = new THREE.Sprite(material);
         return sprite;
     }
 
     function create_axis_line(start, end, width, color){
-        const geometry = new LineSegmentsGeometry().setPositions([start.x, start.y, start.z, end.x, end.y, end.z])
+        const geometry = new LineSegmentsGeometry().setPositions([start.x, start.y, start.z, end.x, end.y, end.z]);
         const material = new LineMaterial({
             color: color,   
             linewidth: width
@@ -194,16 +242,34 @@ function gpd_vis() {
         return new LineSegments2(geometry, material);
     }
 
-    function create_axis(center, width=8.0, scale=0.5, labelx="x", labely="y", labelz="z", colorx = '#ff0000', colory='#00ff00', colorz='#0000ff') {
+    function create_axis_with_labels(center, width=10.0, scale=0.5, labelx="x", labely="y", labelz="z", colorx='#06b6d4', colory='#f59e0b', colorz='#8b5cf6', z_centered = false, label_scale = 0.3, label_offset = 0.1) {
         let x_axis = create_axis_line(center, new THREE.Vector3(center.x + scale, center.y, center.z), width, colorx)
         let y_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y + scale, center.z), width, colory)
-        let z_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y, center.z + scale), width, colorz)
+        
+        let z_axis;
+        if (z_centered) {
+            z_axis = create_axis_line(new THREE.Vector3(center.x, center.y, center.z - scale/2), new THREE.Vector3(center.x, center.y, center.z + scale/2), width, colorz)
+        } else {
+            z_axis = create_axis_line(center, new THREE.Vector3(center.x, center.y, center.z + scale), width, colorz)
+        }
+    
         let x_label = create_axis_label(labelx, colorx)
         let y_label = create_axis_label(labely, colory)
         let z_label = create_axis_label(labelz, colorz)
-        x_label.position.set(center.x + scale + 0.2, center.y, center.z);
-        y_label.position.set(center.x, center.y + scale + 0.2, center.z);
-        z_label.position.set(center.x, center.y, center.z + scale + 0.2);
+    
+        x_label.position.set(center.x + scale + label_offset, center.y, center.z);
+        y_label.position.set(center.x, center.y + scale + label_offset, center.z);
+    
+        if (z_centered) {
+            z_label.position.set(center.x, center.y, center.z + scale/2 + label_offset);
+        } else {
+            z_label.position.set(center.x, center.y, center.z + scale + label_offset);
+        }
+        
+        x_label.scale.set(label_scale, label_scale, label_scale);
+        y_label.scale.set(label_scale, label_scale, label_scale);
+        z_label.scale.set(label_scale, label_scale, label_scale);
+    
         return [x_axis, y_axis, z_axis, x_label, y_label, z_label];
     }
 
@@ -318,8 +384,88 @@ function gpd_vis() {
         }
     }
 
+    // Draw z-axis ticks and labels
+    function addZAxisTicks(scene, minGPD, maxGPD, numTicks = 4) {
+        const zStart = -0.5;
+        const zEnd = 0.5;
+        const xPos = 0;
+        const yPos = 0;
+        const tickLength = 0.02; // length of the tick mark
+
+        // Remove previous ticks if any
+        if (scene.__zAxisTicks) {
+            scene.__zAxisTicks.forEach(obj => scene.remove(obj));
+        }
+        const tickObjs = [];
+
+        const createTick = (gpdValue) => {
+            const frac = (gpdValue - minGPD) / (maxGPD - minGPD);
+            const z = zStart + (zEnd - zStart) * frac;
+
+            // Tick mark (line)
+            const tickGeom = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(xPos - tickLength / 2, yPos, z),
+                new THREE.Vector3(xPos + tickLength / 2, yPos, z)
+            ]);
+            const tickMat = new THREE.LineBasicMaterial({ color: baseColor });
+            const tickLine = new THREE.Line(tickGeom, tickMat);
+            scene.add(tickLine);
+            tickObjs.push(tickLine);
+
+            // Label (sprite)
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold 32px Arial';
+            ctx.fillStyle = baseColor;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.clearRect(0, 0, 256, 64);
+            ctx.fillText(gpdValue.toFixed(3), 5, 32);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+            const sprite = new THREE.Sprite(mat);
+            sprite.position.set(xPos - tickLength / 2, yPos, z);
+            sprite.scale.set(0.18, 0.045, 1);
+            scene.add(sprite);
+            tickObjs.push(sprite);
+        };
+
+        // Always include a tick at 0
+        createTick(0);
+
+        // Add ticks on the positive side
+        for (let i = 1; i <= numTicks; i++) {
+            createTick(i * maxGPD / numTicks);
+        }
+
+        // Add ticks on the negative side
+        for (let i = 1; i <= numTicks; i++) {
+            createTick(i * minGPD / numTicks);
+        }
+
+        scene.__zAxisTicks = tickObjs;
+    }
+
     Promise.all(load_data_files())
     .then(([x, xi, t, Q2, gpd_4d_flat]) => {
+        // Wire custom dropdown clicks -> update color and label
+        if (bgDropdownMenu) {
+            bgDropdownMenu.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-color]');
+                if (!btn) return;
+                const color = btn.getAttribute('data-color');
+                const label = btn.getAttribute('data-label') || '';
+                currentBg = color;
+                applyBackground(currentBg);
+                updateBgToggle(currentBg, label);
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            applyBackground(currentBg);
+        });
+        
         x = new Float64Array(x);
         xi = new Float64Array(xi);
         t = new Float64Array(t);
@@ -344,12 +490,13 @@ function gpd_vis() {
         document.querySelectorAll('.colorbar-labels')[0].textContent = `${max_gpd.toFixed(3)}`;
         document.querySelectorAll('.colorbar-labels')[1].textContent = `${min_gpd.toFixed(3)}`;
     
-        let camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth /  threeContainer.clientHeight, 0.1, 1000);
-        camera.position.set(0.345, -0.597, 0.970);
-        camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
+        let camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth / threeContainer.clientHeight, 0.1, 1000);
+        camera.position.set(0.147, -0.898, 0.165);
+        camera.quaternion.set(0.658, -0.102, -0.070, 0.743);
+        camera.up.set(-0.094, -0.145, 0.985);
     
-        let renderer = new THREE.WebGLRenderer({antialias:true});
-        renderer.setClearColor("#52576e");
+        renderer = new THREE.WebGLRenderer({antialias:true});
+        renderer.setClearColor(currentBg);
         renderer.setSize( threeContainer.clientWidth, threeContainer.clientHeight );
         threeContainer.appendChild(renderer.domElement);
 
@@ -360,7 +507,6 @@ function gpd_vis() {
         let min_axis1, max_axis1, min_axis2, max_axis2;
         let arrays1 = [[], []];
         let arrays2 = [[], []];
-        let scene;
         let positions;
         let colors;
         let axis_scene;
@@ -377,6 +523,7 @@ function gpd_vis() {
         // Helper to draw D3 heatmap for current 2D slice
         function drawHeatmap() {
             heatmapContainer.innerHTML = '';
+            heatmapContainer.style.background = currentBg;
             const axis1 = chosen_vars[0];
             const axis2 = chosen_vars[1];
             const arr1 = x_xi_t_Q2_array[axis1];
@@ -582,7 +729,7 @@ function gpd_vis() {
                 if (arr1.length === targetGridSize) {
                     actualValue = arr1[tickIndex];
                 } else {
-                    const interpolationData = interpolateValue(tickIndex, targetGridSize, arr1.length);
+                    const interpolationData = interpolateValue(tickIndex, arr1.length, targetGridSize);
                     const lowerValue = arr1[interpolationData.lowerIndex];
                     const upperValue = arr1[interpolationData.upperIndex];
                     actualValue = lowerValue * (1 - interpolationData.fraction) + upperValue * interpolationData.fraction;
@@ -620,7 +767,7 @@ function gpd_vis() {
                 if (arr2.length === targetGridSize) {
                     actualValue = arr2[tickIndex];
                 } else {
-                    const interpolationData = interpolateValue(tickIndex, targetGridSize, arr2.length);
+                    const interpolationData = interpolateValue(tickIndex, arr2.length, targetGridSize);
                     const lowerValue = arr2[interpolationData.lowerIndex];
                     const upperValue = arr2[interpolationData.upperIndex];
                     actualValue = lowerValue * (1 - interpolationData.fraction) + upperValue * interpolationData.fraction;
@@ -648,18 +795,19 @@ function gpd_vis() {
             
             // Axis labels
             svg.append('text')
-                .attr('x', squareSize/2)
-                .attr('y', squareSize + 25)
-                .attr('text-anchor', 'middle')
-                .attr('font-size', '16px')
+                .attr('x', squareSize + 10)
+                .attr('y', squareSize + 15)
+                .attr('text-anchor', 'start')
+                .attr('font-size', '20px')
+                .attr('font-weight', 'bold')
                 .attr('fill', 'white')
                 .text(axis_labels[axis1]);
             svg.append('text')
-                .attr('transform', 'rotate(-90)')
-                .attr('x', -squareSize/2)
-                .attr('y', -margin.left + 5)
-                .attr('text-anchor', 'middle')
-                .attr('font-size', '16px')
+                .attr('x', -10)
+                .attr('y', -5)
+                .attr('text-anchor', 'end')
+                .attr('font-size', '20px')
+                .attr('font-weight', 'bold')
                 .attr('fill', 'white')
                 .text(axis_labels[axis2]);
 
@@ -673,6 +821,7 @@ function gpd_vis() {
             if (is2DView) {
                 threeContainer.style.display = 'none';
                 heatmapContainer.style.display = 'block';
+                heatmapContainer.style.background = currentBg;
                 drawHeatmap();
                 // Disable multi-surface controls in 2D view
                 if (multiSurface1Btn) multiSurface1Btn.disabled = true;
@@ -681,6 +830,7 @@ function gpd_vis() {
             } else {
                 threeContainer.style.display = 'block';
                 heatmapContainer.style.display = 'none';
+                if (renderer) renderer.setClearColor(currentBg);
                 // Enable multi-surface controls in 3D view
                 if (multiSurface1Btn) multiSurface1Btn.disabled = false;
                 if (multiSurface2Btn) multiSurface2Btn.disabled = false;
@@ -695,9 +845,10 @@ function gpd_vis() {
                     }
                 }, 0);
             }
+            applyBackground(currentBg);
             moveColorbarToCurrentView();
         }
-
+        
         function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar) {
             // stop any existing animation
             if (window[playingFlag]) {
@@ -753,7 +904,7 @@ function gpd_vis() {
             axis_camera.quaternion.copy(camera.quaternion);
             renderer.clearDepth();  
             renderer.autoClear = false;
-            renderer.setViewport(0, 0, 300, 300);
+            renderer.setViewport(0, 0, 200, 200);
             renderer.render(axis_scene, axis_camera);
         }
 
@@ -790,7 +941,7 @@ function gpd_vis() {
                 scene = new THREE.Scene();
                 geometry = new THREE.PlaneGeometry(1, 1, arrays1[0].length - 1, arrays1[1].length - 1);
                 let plane = new THREE.Mesh(geometry, material);
-                let global_axis = create_axis(new THREE.Vector3(0, 0, 0), 3.0, 1.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+                let global_axis = create_axis_with_labels(new THREE.Vector3(0, 0, 0), 1.0, 1.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD", '#06b6d4', '#f59e0b', '#8b5cf6', true, 0.2, 0.05);
                 global_axis.forEach(element => { scene.add(element); });
                 
                 // Add a reference plane at Z=0 to show where GPD=0 is
@@ -799,16 +950,20 @@ function gpd_vis() {
                     color: 0xaaaaaa,
                     transparent: true,
                     opacity: 0.5,
-                    side: THREE.DoubleSide
+                    side: THREE.DoubleSide,
+                    polygonOffset: true,
+                    polygonOffsetFactor: -1.0,
+                    polygonOffsetUnits: -4.0
                 });
                 let referencePlane = new THREE.Mesh(referencePlaneGeometry, referencePlaneMaterial);
                 referencePlane.position.set(0.5, 0.5, 0); // Center at the middle of the XY plane
                 scene.add(referencePlane);
                 
                 scene.add(plane);
+                addZAxisTicks(scene, min_gpd, max_gpd);
     
                 axis_scene = new THREE.Scene();
-                let orient_axis = create_axis(new THREE.Vector3(0, 0, 0), 5.0, 1.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD");
+                let orient_axis = create_axis_with_labels(new THREE.Vector3(0, 0, 0), 5.0, 1.0, axis_labels[chosen_vars[0]], axis_labels[chosen_vars[1]], "GPD", '#06b6d4', '#f59e0b', '#8b5cf6', false, 1.0, 0.2);
                 orient_axis.forEach(element => { axis_scene.add(element); });
     
                 positions = geometry.attributes.position;
@@ -827,22 +982,29 @@ function gpd_vis() {
     
             if (slider_changed) {
                 slider_changed = false;
-                for (let i = 0; i < positions.count; i++) {
-                    let axis2_index = Math.floor(i / arrays1[0].length);
-                    let axis1_index = i % arrays1[0].length;
-                    let query_index = [0, 0, 0, 0];
-                    query_index[remaining_vars[0]] = control_index[0];
-                    query_index[remaining_vars[1]] = control_index[1];
-                    query_index[chosen_vars[0]] = axis1_index;
-                    query_index[chosen_vars[1]] = axis2_index;
-                    let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
-                    let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
-                    let z_value = gpd_value * 2 - 1;
-                    positions.setZ(i, z_value);
-                    let color = evaluate_cmap(gpd_value, currentColormap, false);
-                    colors[i * 3] = color[0] / 255.;
-                    colors[i * 3 + 1] = color[1] / 255.;
-                    colors[i * 3 + 2] = color[2] / 255.;
+                let query_index = [0, 0, 0, 0];
+                const z_scale = 0.5;
+    
+                for (let j = 0; j < arrays1[1].length; j++) {
+                    for (let i = 0; i < arrays1[0].length; i++) {
+                        query_index[chosen_vars[0]] = i;
+                        query_index[chosen_vars[1]] = j;
+                        query_index[remaining_vars[0]] = control_index[0];
+                        query_index[remaining_vars[1]] = control_index[1];
+    
+                        let gpd_val = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                        let normalized_gpd = (gpd_val - min_gpd) / (max_gpd - min_gpd);
+                        
+                        const z = (normalized_gpd - 0.5) * 2 * z_scale;
+    
+                        let vertex = geometry.attributes.position;
+                        vertex.setZ(j * arrays1[0].length + i, z);
+    
+                        let color = evaluate_cmap(normalized_gpd, currentColormap, false);
+                        colors[(j * arrays1[0].length + i) * 3] = color[0] / 255.;
+                        colors[(j * arrays1[0].length + i) * 3 + 1] = color[1] / 255.;
+                        colors[(j * arrays1[0].length + i) * 3 + 2] = color[2] / 255.;
+                    }
                 }
                 geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
                 positions.needsUpdate = true;
@@ -891,8 +1053,10 @@ function gpd_vis() {
     
         function resetView() {
             // Reset main camera
-            camera.position.set(0.345, -0.597, 0.970);
-            camera.quaternion.set(0.535, -0.134, 0.086, 0.829);
+            camera.position.set(0.147, -0.898, 0.165);
+            camera.quaternion.set(0.658, -0.102, -0.070, 0.743);
+            camera.up.set(-0.094, -0.145, 0.985);
+            camera.updateProjectionMatrix();
             controls.target.set(0.5, 0.5, 0);
             controls.update();
             
@@ -906,6 +1070,7 @@ function gpd_vis() {
             axis_camera.zoom = 1;
             axis_camera.updateProjectionMatrix();
             
+            applyBackground(currentBg);
             updateSceneInfo('View reset to default');
         }
     
@@ -1097,11 +1262,9 @@ function gpd_vis() {
                 chosen_vars[0] = selectedValue;
                 updated_axis = true;
                 slider_changed = true;
-                const newMiddle0 = Math.floor(arrays2[0].length / 2);
-                const newMiddle1 = Math.floor(arrays2[1].length / 2);
-                control_index = [newMiddle0, newMiddle1];
-                slider1.noUiSlider.set(newMiddle0);
-                slider2.noUiSlider.set(newMiddle1);
+                control_index = [0, 0];
+                slider1.noUiSlider.set(0);
+                slider2.noUiSlider.set(0);
                 updateSliderLabels();
                 showNotification(`Primary axis changed to ${axis_labels[selectedValue]}`, "success");
                 updateColorbar(min_gpd, max_gpd, currentColormap);
@@ -1118,12 +1281,10 @@ function gpd_vis() {
                 chosen_vars[1] = selectedValue;
                 updated_axis = true;
                 slider_changed = true;
-                const newMiddle0 = Math.floor(arrays2[0].length / 2);
-                const newMiddle1 = Math.floor(arrays2[1].length / 2);
-                control_index = [newMiddle0, newMiddle1];
-                slider1.noUiSlider.set(newMiddle0);
-                slider2.noUiSlider.set(newMiddle1);
-                updateSliderLabels();                                           
+                control_index = [0, 0];
+                slider1.noUiSlider.set(0);
+                slider2.noUiSlider.set(0);
+                updateSliderLabels();                                            
                 showNotification(`Secondary axis changed to ${axis_labels[selectedValue]}`, "success");
                 updateColorbar(min_gpd, max_gpd, currentColormap);
             });
@@ -1163,7 +1324,17 @@ function gpd_vis() {
         if (resetViewBtn) {
             resetViewBtn.addEventListener('click', resetView);
         }
-    
+
+        if (colormapSelect) {
+            colormapSelect.addEventListener('change', function() {
+                currentColormap = colormapSelect.value;
+                updateColorbar(min_gpd, max_gpd, currentColormap);
+                if (is2DView) {
+                    drawHeatmap();
+                }
+            });
+        }
+
         // Window resize handling
         window.addEventListener('resize', function() {
             camera.aspect = threeContainer.clientWidth / threeContainer.clientHeight;
@@ -1176,7 +1347,19 @@ function gpd_vis() {
     
         // Keyboard shortcuts
         window.addEventListener('keydown', function(event) {
-            if (event.ctrlKey && event.key === 'r') {
+            if (event.key === 'c') {
+                const pos = camera.position;
+                const quat = camera.quaternion;
+                const target = controls.target;
+                const up = camera.up;
+                console.log('// Current camera state:');
+                console.log(`camera.position.set(${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}, ${pos.z.toFixed(3)});`);
+                console.log(`camera.quaternion.set(${quat.x.toFixed(3)}, ${quat.y.toFixed(3)}, ${quat.z.toFixed(3)}, ${quat.w.toFixed(3)});`);
+                console.log(`camera.up.set(${up.x.toFixed(3)}, ${up.y.toFixed(3)}, ${up.z.toFixed(3)});`);
+                console.log(`controls.target.set(${target.x.toFixed(3)}, ${target.y.toFixed(3)}, ${target.z.toFixed(3)});`);
+                console.log(`camera.zoom.set(${camera.zoom.toFixed(3)});`);
+            }
+            else if (event.ctrlKey && event.key === 'r') {
                 event.preventDefault();
                 resetView();
             }

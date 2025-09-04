@@ -119,12 +119,20 @@
             min-height: 400px;
             height: 100%;
         }
+        /* Small color swatch used in background dropdown and button */
+        .bg-swatch {
+            width: 30px;
+            height: 15px;
+            border-radius: 3px;
+            border: 1px solid #cbd5e1;
+            display: inline-block;
+        }
     </style>
 </head>
 
 <body class="d-flex flex-column vh-100">
     <!-- Data upload module -->
-    <div id="data-upload-overlay" class="position-fixed top-0 start-0 w-100 h-100 bg-light" style="z-index:10000; overflow-y: auto;">
+    <div id="data-upload-overlay" class="position-fixed top-0 start-0 w-100 h-100 bg-light" style="z-index:10000;">
         <div class="modal-dialog" style="max-width: 600px; width: 100%;">
             <div class="modal-content p-4">
                 <h2 class="my-3 text-center text-primary"><i class="fas fa-upload me-2"></i>Upload Data Files</h2>
@@ -135,7 +143,7 @@
                         <input type="file" class="form-control" id="file-x" required>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label">x<sub>i</sub> values (e.g., xi.bin)</label>
+                        <label class="form-label">ξ values (e.g., xi.bin)</label>
                         <input type="file" class="form-control" id="file-xi" required>
                     </div>
                     <div class="mb-2">
@@ -178,7 +186,7 @@
                                 <label for="dropdown1" class="form-label fw-semibold">Primary Axis</label>
                                 <select id="dropdown1" class="form-select">
                                     <option value="0">x</option>
-                                    <option value="1">xᵢ</option>
+                                    <option value="1">ξ</option>
                                     <option value="2">t</option>
                                     <option value="3">Q²</option>
                                 </select>
@@ -187,7 +195,7 @@
                                 <label for="dropdown2" class="form-label fw-semibold">Secondary Axis</label>
                                 <select id="dropdown2" class="form-select">
                                     <option value="0">x</option>
-                                    <option value="1">xᵢ</option>
+                                    <option value="1">ξ</option>
                                     <option value="2">t</option>
                                     <option value="3">Q²</option>
                                 </select>
@@ -247,9 +255,9 @@
                             <!-- Second Row: Colormap Controls -->
                             <div class="d-flex align-items-center">
                                 <span class="text-muted mx-2 fw-semibold">Colormap</span>
-                                <div id="single-colormap-controls" class="align-items-center" style="display: flex;">
-                                    <select id="colormap-select" class="form-select form-select-sm w-auto me-2">
-                                        <!-- Diverging colormaps only -->
+                                <div id="single-colormap-controls" class="d-flex align-items-center">
+                                    <select id="colormap-select" class="form-select form-select-sm w-auto me-3">
+                                        <!-- Diverging colormaps -->
                                         <option value="coolwarm">Coolwarm</option>
                                         <option value="RdBu">RdBu</option>
                                         <option value="Spectral">Spectral</option>
@@ -261,6 +269,20 @@
                                         <option value="RdYlBu">RdYlBu</option>
                                         <option value="RdYlGn">RdYlGn</option>
                                     </select>
+                                </div>
+                                <span class="text-muted mx-2 fw-semibold">Background</span>
+                                <div class="dropdown">
+                                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle d-flex align-items-center ms-1" type="button" id="bg-dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                        <span class="bg-swatch" style="background: #52576e;"></span>
+                                        <span class="ms-2">Graphite</span>
+                                    </button>
+                                    <ul class="dropdown-menu" aria-labelledby="bg-dropdown-toggle" id="bg-dropdown-menu">
+                                        <li><button class="dropdown-item d-flex align-items-center" data-color="#52576e" data-label="Graphite"><span class="bg-swatch me-2" style="background: #52576e;"></span>Graphite</button></li>
+                                        <li><button class="dropdown-item d-flex align-items-center" data-color="#1e1b4b" data-label="Indigo 950"><span class="bg-swatch me-2" style="background: #1e1b4b;"></span>Indigo</button></li>
+                                        <li><button class="dropdown-item d-flex align-items-center" data-color="#2b2f3a" data-label="Charcoal"><span class="bg-swatch me-2" style="background: #2b2f3a;"></span>Charcoal</button></li>
+                                        <li><button class="dropdown-item d-flex align-items-center" data-color="#0b132b" data-label="Midnight"><span class="bg-swatch me-2" style="background: #0b132b;"></span>Midnight</button></li>
+                                        <li><button class="dropdown-item d-flex align-items-center" data-color="#f8fafc" data-label="Off White"><span class="bg-swatch me-2" style="background: #f8fafc;"></span>Off White</button></li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>
@@ -300,7 +322,7 @@
             <p><strong>Parameters:</strong></p>
             <ul>
               <li><strong>x:</strong></li>
-              <li><strong>x<sub>i</sub>:</strong></li>
+              <li><strong>ξ:</strong></li>
               <li><strong>t:</strong></li>
               <li><strong>Q<sup>2</sup>:</strong></li>
             </ul>
@@ -309,6 +331,5 @@
         </div>
       </div>
     </div>
-
 </body>
 </html>
