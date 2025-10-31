@@ -19,12 +19,19 @@ const axis_labels = [
 let chosen_vars = [0, 3]        // x, Q2
 let remaining_vars = [1, 2];    // ξ, t
 let control_index = [0, 0];
+// let data_files = [
+//     { name: "x values", path: "data/x.npy", key: 'x', type: 'npy' },
+//     { name: "ξ values", path: "data/xi.npy", key: 'xi', type: 'npy' },
+//     { name: "t values", path: "data/t.npy", key: 't', type: 'npy' },
+//     { name: "Q² values", path: "data/Q2.npy", key: 'Q2', type: 'npy' },
+//     { name: "GPD data", path: "data/gpd_4d.npy", key: 'gpd_4d', type: 'npy' },
+// ];
 let data_files = [
-    { name: "x values (x.npy)", path: "data/x.npy", key: 'x', type: 'npy' },
-    { name: "ξ values (xi.npy)", path: "data/xi.npy", key: 'xi', type: 'npy' },
-    { name: "t values (t.npy)", path: "data/t.npy", key: 't', type: 'npy' },
-    { name: "Q² values (Q2.npy)", path: "data/Q2.npy", key: 'Q2', type: 'npy' },
-    { name: "GPD data (gpd_4d.npy)", path: "data/gpd_4d.npy", key: 'gpd_4d', type: 'npy' },
+    { name: "x values", path: "data_new/x_grid.npy", key: 'x', type: 'npy' },
+    { name: "ξ values", path: "data_new/xi_array.npy", key: 'xi', type: 'npy' },
+    { name: "t values", path: "data_new/t_array.npy", key: 't', type: 'npy' },
+    { name: "Q² values", path: "data_new/Q2_array.npy", key: 'Q2', type: 'npy' },
+    { name: "GPD data", path: "data_new/gpd_x_xi_t_Q2_r_small.npy", key: 'gpd_4d', type: 'npy' },
 ];
 let multi_surface_active = null; // null, 0, or 1
 let start_slider_at_middle = false;
@@ -43,7 +50,6 @@ const slider2 = document.getElementById('slider2');
 const multi_surface_btn1 = document.getElementById('multi-surface1');
 const multi_surface_btn2 = document.getElementById('multi-surface2');
 const num_surfaces_input = document.getElementById('num-surfaces-input');
-let num_surfaces = 10;
 
 const play_slider_btn1 = document.getElementById('play-slider1');
 const play_slider_btn2 = document.getElementById('play-slider2');
@@ -186,7 +192,7 @@ function loadDataFiles() {
     const results = [];
     for (const file of data_files) {
         if (loading_text) {
-            loading_text.textContent = `Loading ${file.name}...`;
+            loading_text.textContent = `Loading ${file.name} (${file.path})...`;
         }
         results.push(loadFile(file.path, file.type));
     }
@@ -199,13 +205,12 @@ function gpdVis() {
     let use_local_range = false;
     
     Promise.all(loadDataFiles())
-    .then(([x, xi, t, Q2, gpd_4d_flat]) => {
+    .then(([x_grid_flat, xi, t, Q2, gpd_5d_flat]) => {
         
-        x = new Float64Array(x);
         xi = new Float64Array(xi);
         t = new Float64Array(t);
         Q2 = new Float64Array(Q2);
-        gpd_4d_flat = new Float64Array(gpd_4d_flat);
+        gpd_5d_flat = new Float64Array(gpd_5d_flat);
         
         loading_overlay.style.display = 'none';
         main_content.style.display = 'block';
@@ -213,10 +218,66 @@ function gpdVis() {
         dropdown2.value = chosen_vars[1];
         colormap_select.value = current_colormap;
         
+        // x_grid is 2D: (nx, nxi) - each column is x values for a given xi
+        // gpd_5d is: (nx, nxi, nt, nQ2, nreplicas)
+        const nxi = xi.length;
+        const nt = t.length;
+        const nQ2 = Q2.length;
+        const nx = x_grid_flat.length / nxi;
+        const nreplicas = gpd_5d_flat.length / (nx * nxi * nt * nQ2);
+        
+        console.log(`Data dimensions: nx=${nx}, nxi=${nxi}, nt=${nt}, nQ2=${nQ2}, nreplicas=${nreplicas}`);
+        
+        // Reshape x_grid to 2D array
+        const x_grid = new ndarray(new Float64Array(x_grid_flat), [nx, nxi]);
+        
+        // Reshape gpd_5d and store for replica access
+        const gpd_5d = new ndarray(gpd_5d_flat, [nx, nxi, nt, nQ2, nreplicas]);
+        
+        // Calculate the mean of replicas to create a 4D array for the default view
+        const gpd_4d_mean_flat = new Float64Array(nx * nxi * nt * nQ2);
+        for (let i = 0; i < nx; i++) {
+            for (let j = 0; j < nxi; j++) {
+                for (let k = 0; k < nt; k++) {
+                    for (let l = 0; l < nQ2; l++) {
+                        let sum = 0;
+                        for (let r = 0; r < nreplicas; r++) {
+                            sum += gpd_5d.get(i, j, k, l, r);
+                        }
+                        const mean = sum / nreplicas;
+                        const idx_4d = l + k*nQ2 + j*nQ2*nt + i*nQ2*nt*nxi;
+                        gpd_4d_mean_flat[idx_4d] = mean;
+                    }
+                }
+            }
+        }
+        
+        const gpd_4d = new ndarray(gpd_4d_mean_flat, [nx, nxi, nt, nQ2]);
+        
+        // NOTE: x values actually depend on ξ (x_grid is 2D).
+        const xi_initial_idx = 0;
+        const x = new Float64Array(nx);
+        for (let i = 0; i < nx; i++) {
+            x[i] = x_grid.get(i, xi_initial_idx);
+        }
+        
+        
         var x_xi_t_Q2_array = [x, xi, t, Q2];
-        let dims = [x.length, xi.length, t.length, Q2.length];
-        let gpd_4d = new ndarray(gpd_4d_flat, dims);
-        [min_gpd, max_gpd] = getExtrema(gpd_4d_flat);
+
+        // Get the global min/max of the x_grid for correct normalization
+        const [min_x_global, max_x_global] = getExtrema(x_grid.data);
+
+        function updateXArray(xi_index) {
+            if (xi_index >= 0 && xi_index < nxi) {
+                const new_x = new Float64Array(nx);
+                for (let i = 0; i < nx; i++) {
+                    new_x[i] = x_grid.get(i, xi_index);
+                }
+                x_xi_t_Q2_array[0] = new_x;
+            }
+        }
+
+        [min_gpd, max_gpd] = getExtrema(gpd_5d_flat);
         let current_range = [min_gpd, max_gpd];
         let camera_3d_state = {};
     
@@ -1212,11 +1273,34 @@ function gpdVis() {
     
                 positions = geometry.attributes.position;
                 colors = new Float32Array(positions.count * 3);
+                
+                // Check if we're visualizing x vs ξ (indices 0 and 1)
+                const is_x_xi_plot = (chosen_vars[0] === 0 && chosen_vars[1] === 1) || 
+                                     (chosen_vars[0] === 1 && chosen_vars[1] === 0);
+                
                 for (let i = 0; i < positions.count; i++) {
                     let axis2_index = Math.floor(i / arrays1[0].length);
                     let axis1_index = i % arrays1[0].length;
-                    let axis1_value = (arrays1[0][axis1_index] - min_axis1) / (max_axis1 - min_axis1);
-                    let axis2_value = (arrays1[1][axis2_index] - min_axis2) / (max_axis2 - min_axis2);
+                    
+                    let axis1_value, axis2_value;
+                    
+                    if (is_x_xi_plot) {
+                        // Use the 2D x_grid for correct x values at each ξ
+                        if (chosen_vars[0] === 0) { // x is axis1, ξ is axis2
+                            const x_val = x_grid.get(axis1_index, axis2_index);
+                            axis1_value = (x_val - min_x_global) / (max_x_global - min_x_global);
+                            axis2_value = (arrays1[1][axis2_index] - min_axis2) / (max_axis2 - min_axis2);
+                        } else { // ξ is axis1, x is axis2
+                            const x_val = x_grid.get(axis2_index, axis1_index);
+                            axis1_value = (arrays1[0][axis1_index] - min_axis1) / (max_axis1 - min_axis1);
+                            axis2_value = (x_val - min_x_global) / (max_x_global - min_x_global);
+                        }
+                    } else {
+                        // Standard case: independent arrays
+                        axis1_value = (arrays1[0][axis1_index] - min_axis1) / (max_axis1 - min_axis1);
+                        axis2_value = (arrays1[1][axis2_index] - min_axis2) / (max_axis2 - min_axis2);
+                    }
+                    
                     positions.setX(i, axis1_value);
                     positions.setY(i, axis2_value);
                 }
@@ -1333,25 +1417,6 @@ function gpdVis() {
     
         /* Add event listeners below */
         if (slider1) {
-            slider1.noUiSlider.on('change', function(values, handle) {
-                control_index[0] = Number(values[0]);
-                slider_changed = true;
-                if (multi_surface_active === 0) {
-                    showMultipleSurfaces(0);
-                } else {
-                    clearMultiSurface();
-                }
-                // Update view depending on current mode
-                updateCurrentRange();
-                if (is_2d_view) {
-                    drawHeatmap();
-                } else {
-                    if (scene) {
-                        drawAxisTicks(scene, 'z', current_range[0], current_range[1], 4, [min_axis1, max_axis1], [min_axis2, max_axis2]);
-                    }
-                }
-                updateColorbar(current_range[0], current_range[1], current_colormap);
-            });
             // Stop animation if user interacts with slider manually
             slider1.noUiSlider.on('start', function() {
                 if (window.slider1Playing) {
@@ -1361,33 +1426,69 @@ function gpdVis() {
                     window.slider1Interval = null;
                 }
             });
+            slider1.noUiSlider.on('update', function (values, handle) {
+                let value = parseInt(values[handle]);
+                if (control_index[0] !== value) {
+                    control_index[0] = value;
+                    slider_changed = true;
+                    document.getElementById('slider1-value').textContent = arrays2[0][value].toFixed(3);
+                    
+                    // If slider 1 controls xi, update the x array
+                    if (remaining_vars[0] === 1) { // 1 is the index for xi
+                        updateXArray(value);
+                    }
+
+                    if (multi_surface_active !== null) {
+                        showMultipleSurfaces(multi_surface_active);
+                    }
+                    // Update view depending on current mode
+                    updateCurrentRange();
+                    if (is_2d_view) {
+                        drawHeatmap();
+                    } else {
+                        if (scene) {
+                            drawAxisTicks(scene, 'z', current_range[0], current_range[1], 4, [min_axis1, max_axis1], [min_axis2, max_axis2]);
+                        }
+                    }
+                    updateColorbar(current_range[0], current_range[1], current_colormap);
+                }
+            });
         }
         if (slider2) {
-            slider2.noUiSlider.on('change', function(values, handle) {
-                control_index[1] = Number(values[0]);
-                slider_changed = true;
-                if (multi_surface_active === 1) {
-                    showMultipleSurfaces(1);
-                } else {
-                    clearMultiSurface();
-                }
-                // Update view depending on current mode
-                updateCurrentRange();
-                if (is_2d_view) {
-                    drawHeatmap();
-                } else {
-                    if (scene) {
-                        drawAxisTicks(scene, 'z', current_range[0], current_range[1], 4, [min_axis1, max_axis1], [min_axis2, max_axis2]);
-                    }
-                }
-                updateColorbar(current_range[0], current_range[1], current_colormap);
-            });
+            // Stop animation if user interacts with slider manually
             slider2.noUiSlider.on('start', function() {
                 if (window.slider2Playing) {
                     window.slider2Playing = false;
                     play_slider_btn2.innerHTML = '<i class="fas fa-play"></i>';
                     clearInterval(window.slider2Interval);
                     window.slider2Interval = null;
+                }
+            });
+            slider2.noUiSlider.on('update', function (values, handle) {
+                let value = parseInt(values[handle]);
+                if (control_index[1] !== value) {
+                    control_index[1] = value;
+                    slider_changed = true;
+                    document.getElementById('slider2-value').textContent = arrays2[1][value].toFixed(3);
+
+                    // If slider 2 controls xi, update the x array
+                    if (remaining_vars[1] === 1) { // 1 is the index for xi
+                        updateXArray(value);
+                    }
+
+                    if (multi_surface_active !== null) {
+                        showMultipleSurfaces(multi_surface_active);
+                    }
+                    // Update view depending on current mode
+                    updateCurrentRange();
+                    if (is_2d_view) {
+                        drawHeatmap();
+                    } else {
+                        if (scene) {
+                            drawAxisTicks(scene, 'z', current_range[0], current_range[1], 4, [min_axis1, max_axis1], [min_axis2, max_axis2]);
+                        }
+                    }
+                    updateColorbar(current_range[0], current_range[1], current_colormap);
                 }
             });
         }
@@ -1421,6 +1522,13 @@ function gpdVis() {
     
         function showMultipleSurfaces(idx) {
             stopAllAnimations();
+        
+            // If the button for the active slider is clicked again, clear the surfaces.
+            if (multi_surface_active === idx) {
+                clearMultiSurface();
+                return;
+            }
+        
             multi_surface_active = idx;
             // Toggle button styles
             if (multi_surface_btn1) {
@@ -1431,57 +1539,57 @@ function gpdVis() {
                 multi_surface_btn2.classList.toggle('btn-secondary', idx === 1);
                 multi_surface_btn2.classList.toggle('btn-outline-secondary', idx !== 1);
             }
-            const offset = -5;
-            const centerIdx = control_index[idx];
-            const maxDistance = Math.floor(num_surfaces / 2);
+        
             const surfaces = [];
-            for (let i = 0; i < num_surfaces; i++) {
-                let surfaceIdx = centerIdx + offset + i;
-                // Clamp to valid range
-                const arrLen = idx === 0 ? arrays2[0].length : arrays2[1].length;
-                if (surfaceIdx < 0 || surfaceIdx >= arrLen) continue;
-                // Opacity decreases with distance from center
-                const distance = Math.abs(surfaceIdx - centerIdx);
-                let opacity = 1 - (distance / maxDistance);
-                opacity = Math.max(0.1, opacity);
-    
+        
+            for (let r = 0; r < nreplicas; r++) {
+                // Opacity can be uniform or varied
+                const opacity = 0.5;
+        
                 let surfaceGeometry = geometry.clone();
                 let surfaceMaterial = material.clone();
                 surfaceMaterial.transparent = true;
                 surfaceMaterial.opacity = opacity;
                 let surfacePositions = surfaceGeometry.attributes.position;
                 let surfaceColors = new Float32Array(surfacePositions.count * 3);
+        
+                const [zStart, zEnd] = drawZAxis(scene, current_range[0], current_range[1], [min_axis1, max_axis1], [min_axis2, max_axis2]);
+        
                 for (let j = 0; j < surfacePositions.count; j++) {
                     let axis2_index = Math.floor(j / arrays1[0].length);
                     let axis1_index = j % arrays1[0].length;
+        
                     let query_index = [0, 0, 0, 0];
-                    query_index[remaining_vars[0]] = idx === 0 ? surfaceIdx : control_index[0];
-                    query_index[remaining_vars[1]] = idx === 1 ? surfaceIdx : control_index[1];
                     query_index[chosen_vars[0]] = axis1_index;
                     query_index[chosen_vars[1]] = axis2_index;
-                    let gpd_raw_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
-                    let gpd_value = (gpd_raw_value - min_gpd) / (max_gpd - min_gpd);
+                    query_index[remaining_vars[0]] = control_index[0];
+                    query_index[remaining_vars[1]] = control_index[1];
+        
+                    let gpd_raw_value = gpd_5d.get(query_index[0], query_index[1], query_index[2], query_index[3], r);
                     
-                    // Use scaled actual GPD values (same as main surface)
-                    let gpd_range = max_gpd - min_gpd;
-                    let scale_factor = 2.0 / gpd_range;
-                    let z_value = gpd_raw_value * scale_factor;
+                    // Use valueToZ for correct z position based on the current range (local or global)
+                    const z_value = valueToZ(gpd_raw_value, current_range[0], current_range[1], zStart, zEnd);
                     surfacePositions.setZ(j, z_value);
-                    let color = evaluate_cmap(gpd_value, current_colormap, false);
+        
+                    let normalized_gpd = (gpd_raw_value - current_range[0]) / (current_range[1] - current_range[0]);
+                    let color = evaluate_cmap(normalized_gpd, current_colormap, false);
                     surfaceColors[j * 3] = color[0] / 255.;
                     surfaceColors[j * 3 + 1] = color[1] / 255.;
                     surfaceColors[j * 3 + 2] = color[2] / 255.;
                 }
+        
                 surfaceGeometry.setAttribute('color', new THREE.BufferAttribute(surfaceColors, 3));
                 surfacePositions.needsUpdate = true;
                 surfaceGeometry.computeVertexNormals();
                 let mesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
                 surfaces.push(mesh);
             }
+        
             // Remove previous multi-surface from scene
             if (scene.__multiSurfaces) {
                 scene.__multiSurfaces.forEach(m => scene.remove(m));
             }
+        
             // Add new ones
             surfaces.forEach(m => scene.add(m));
             scene.__multiSurfaces = surfaces;
@@ -1506,18 +1614,10 @@ function gpdVis() {
         }
     
         multi_surface_btn1.addEventListener('click', function() {
-            if (multi_surface_active === 0) {
-                clearMultiSurface();
-            } else {
-                showMultipleSurfaces(0);
-            }
+            showMultipleSurfaces(0);
         });
         multi_surface_btn2.addEventListener('click', function() {
-            if (multi_surface_active === 1) {
-                clearMultiSurface();
-            } else {
-                showMultipleSurfaces(1);
-            }
+            showMultipleSurfaces(1);
         });
     
         if (dropdown1) {
@@ -1648,7 +1748,11 @@ function gpdVis() {
                 range_toggle_btn.innerHTML = use_local_range
                     ? '<i class="fas fa-chart-line me-1"></i> Local Range'
                     : '<i class="fas fa-chart-line me-1"></i> Global Range';
-                
+
+                // Disable/enable play buttons based on range
+                if (play_slider_btn1) play_slider_btn1.disabled = use_local_range;
+                if (play_slider_btn2) play_slider_btn2.disabled = use_local_range;
+
                 slider_changed = true;
                 updated_axis = true;
                 const rangeType = use_local_range ? 'local' : 'global';
