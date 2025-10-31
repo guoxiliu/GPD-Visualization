@@ -56,6 +56,9 @@ const bg_dropdown_menu = document.getElementById('bg-dropdown-menu');
 const bg_dropdown_toggle = document.getElementById('bg-dropdown-toggle');
 let current_background = '#52576e';
 const colormap_select = document.getElementById('colormap-select');
+const heatmap_method_select = document.getElementById('heatmap-method-select');
+const heatmap_controls = document.getElementById('heatmap-controls');
+let heatmap_method = 'all_values'; // 'all_values' or 'interpolation'
 
 const colorbar_container = document.getElementById('colorbar-container');
 const three_container = document.getElementById("three-container");
@@ -599,85 +602,40 @@ function gpdVis() {
 
 
         // Helper to draw D3 heatmap for current 2D slice
+        let heatmap_zoom_transform = null; // Store zoom state
+        
         function drawHeatmap() {
+            if (heatmap_method === 'all_values') {
+                drawHeatmapAllValues();
+            } else {
+                drawHeatmapInterpolation();
+            }
+        }
+
+        function drawHeatmapAllValues() {
             heatmap_container.innerHTML = '';
             heatmap_container.style.background = current_background;
             const axis1 = chosen_vars[0];
             const axis2 = chosen_vars[1];
             const arr1 = x_xi_t_Q2_array[axis1];
             const arr2 = x_xi_t_Q2_array[axis2];
-            const target_grid_size = 20;
-            // const targetGridSize = Math.min(arr1.length, arr2.length);
             
-            // Helper function for linear interpolation
-            function interpolateValue(target_index, source_length, target_length) {
-                const ratio = (source_length - 1) / (target_length - 1);
-                const exact_index = target_index * ratio;
-                const lower_index = Math.floor(exact_index);
-                const upper_index = Math.min(lower_index + 1, source_length - 1);
-                const fraction = exact_index - lower_index;
-                return { lower_index: lower_index, upper_index: upper_index, fraction };
-            }
-            
-            // Prepare 2D data slice for D3 with interpolation
+            // Use actual array values
             const slice = [];
-            for (let j = 0; j < target_grid_size; j++) {
-                for (let i = 0; i < target_grid_size; i++) {
+            for (let j = 0; j < arr2.length; j++) {
+                for (let i = 0; i < arr1.length; i++) {
                     let query_index = [0, 0, 0, 0];
+                    query_index[axis1] = i;
+                    query_index[axis2] = j;
+                    query_index[remaining_vars[0]] = control_index[0];
+                    query_index[remaining_vars[1]] = control_index[1];
                     
-                    // Handle interpolation for axis1
-                    let axis1_indices;
-                    if (arr1.length === target_grid_size) {
-                        axis1_indices = { lower_index: i, upper_index: i, fraction: 0 };
-                    } else {
-                        axis1_indices = interpolateValue(i, arr1.length, target_grid_size);
-                    }
-                    
-                    // Handle interpolation for axis2
-                    let axis2_indices;
-                    if (arr2.length === target_grid_size) {
-                        axis2_indices = { lower_index: j, upper_index: j, fraction: 0 };
-                    } else {
-                        axis2_indices = interpolateValue(j, arr2.length, target_grid_size);
-                    }
-                    
-                    // Bilinear interpolation for GPD values
-                    let interpolated_value;
-                    if (axis1_indices.fraction === 0 && axis2_indices.fraction === 0) {
-                        // No interpolation needed
-                        query_index[axis1] = axis1_indices.lower_index;
-                        query_index[axis2] = axis2_indices.lower_index;
-                        query_index[remaining_vars[0]] = control_index[0];
-                        query_index[remaining_vars[1]] = control_index[1];
-                        interpolated_value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
-                    } else {
-                        // Bilinear interpolation
-                        const values = [];
-                        const indices = [
-                            [axis1_indices.lower_index, axis2_indices.lower_index],
-                            [axis1_indices.upper_index, axis2_indices.lower_index],
-                            [axis1_indices.lower_index, axis2_indices.upper_index],
-                            [axis1_indices.upper_index, axis2_indices.upper_index]
-                        ];
-                        
-                        for (let [idx1, idx2] of indices) {
-                            query_index[axis1] = idx1;
-                            query_index[axis2] = idx2;
-                            query_index[remaining_vars[0]] = control_index[0];
-                            query_index[remaining_vars[1]] = control_index[1];
-                            values.push(gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]));
-                        }
-                        
-                        // Bilinear interpolation formula
-                        const v1 = values[0] * (1 - axis1_indices.fraction) + values[1] * axis1_indices.fraction;
-                        const v2 = values[2] * (1 - axis1_indices.fraction) + values[3] * axis1_indices.fraction;
-                        interpolated_value = v1 * (1 - axis2_indices.fraction) + v2 * axis2_indices.fraction;
-                    }
+                    const value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
                     
                     slice.push({
                         i: i,
                         j: j,
-                        value: interpolated_value
+                        value: value
                     });
                 }
             }
@@ -697,9 +655,27 @@ function gpdVis() {
                 .append('svg')
                 .attr('width', total_svg_width)
                 .attr('height', square_size + margin.top + margin.bottom)
-                .style('display', 'block')
-                .append('g')
+                .style('display', 'block');
+            
+            // Create a group for zooming and panning
+            const zoom_group = svg.append('g')
                 .attr('transform', `translate(${margin.left + horizontal_offset},${margin.top})`);
+            
+            // Define zoom behavior
+            const zoom_behavior = d3.zoom()
+                .scaleExtent([0.5, 10]) // Min zoom = 0.5x, Max zoom = 10x
+                .on('zoom', (event) => {
+                    zoom_group.attr('transform', `translate(${margin.left + horizontal_offset},${margin.top}) ${event.transform}`);
+                    heatmap_zoom_transform = event.transform;
+                });
+            
+            // Apply zoom behavior to svg
+            svg.call(zoom_behavior);
+            
+            // Restore previous zoom state if exists
+            if (heatmap_zoom_transform) {
+                svg.call(zoom_behavior.transform, heatmap_zoom_transform);
+            }
             
             // Create tooltip
             const tooltip = d3.select(heatmap_container)
@@ -719,21 +695,11 @@ function gpdVis() {
                 .style('z-index', '1000');
             
             // Build X and Y scales
-            const x_scale = axis1 === 1 ? d3.scaleLog() : d3.scaleLinear();
+            const x_scale = d3.scaleLinear();
             x_scale.domain(d3.extent(arr1)).range([0, square_size]);
 
-            const y_scale = axis2 === 1 ? d3.scaleLog() : d3.scaleLinear();
+            const y_scale = d3.scaleLinear();
             y_scale.domain(d3.extent(arr2)).range([square_size, 0]);
-
-            // Create interpolated arrays for cell boundaries
-            const arr1_interpolated = Array.from({length: target_grid_size + 1}, (_, i) => {
-                const { lower_index, upper_index, fraction } = interpolateValue(i, arr1.length, target_grid_size);
-                return arr1[lower_index] * (1 - fraction) + arr1[upper_index] * fraction;
-            });
-            const arr2_interpolated = Array.from({length: target_grid_size + 1}, (_, j) => {
-                const { lower_index, upper_index, fraction } = interpolateValue(j, arr2.length, target_grid_size);
-                return arr2[lower_index] * (1 - fraction) + arr2[upper_index] * fraction;
-            });
             
             // Tooltip event handlers
             const mouseover = function(event, d) {
@@ -779,14 +745,69 @@ function gpdVis() {
                 tooltip.style('opacity', 0);
             };
             
-            // Draw squares
-            svg.selectAll('rect')
+            zoom_group.selectAll('rect')
                 .data(slice)
                 .join('rect')
-                .attr('x', d => x_scale(arr1_interpolated[d.i]))
-                .attr('y', d => Math.min(y_scale(arr2_interpolated[d.j]), y_scale(arr2_interpolated[d.j + 1])))
-                .attr('width', d => x_scale(arr1_interpolated[d.i + 1]) - x_scale(arr1_interpolated[d.i]))
-                .attr('height', d => Math.abs(y_scale(arr2_interpolated[d.j]) - y_scale(arr2_interpolated[d.j + 1])))
+                .attr('x', d => {
+                    // Calculate cell boundaries based on actual array values
+                    let x_left, x_right;
+                    if (d.i === 0) {
+                        x_left = x_scale(arr1[0]);
+                        x_right = x_scale((arr1[0] + arr1[1]) / 2);
+                    } else if (d.i === arr1.length - 1) {
+                        x_left = x_scale((arr1[arr1.length - 2] + arr1[arr1.length - 1]) / 2);
+                        x_right = x_scale(arr1[arr1.length - 1]);
+                    } else {
+                        x_left = x_scale((arr1[d.i - 1] + arr1[d.i]) / 2);
+                        x_right = x_scale((arr1[d.i] + arr1[d.i + 1]) / 2);
+                    }
+                    return Math.min(x_left, x_right);
+                })
+                .attr('y', d => {
+                    // Calculate cell boundaries based on actual array values
+                    let y_top, y_bottom;
+                    if (d.j === 0) {
+                        y_top = y_scale(arr2[0]);
+                        y_bottom = y_scale((arr2[0] + arr2[1]) / 2);
+                    } else if (d.j === arr2.length - 1) {
+                        y_top = y_scale((arr2[arr2.length - 2] + arr2[arr2.length - 1]) / 2);
+                        y_bottom = y_scale(arr2[arr2.length - 1]);
+                    } else {
+                        y_top = y_scale((arr2[d.j] + arr2[d.j + 1]) / 2);
+                        y_bottom = y_scale((arr2[d.j - 1] + arr2[d.j]) / 2);
+                    }
+                    return Math.min(y_top, y_bottom);
+                })
+                .attr('width', d => {
+                    // Width based on midpoints between adjacent cells
+                    let x_left, x_right;
+                    if (d.i === 0) {
+                        x_left = x_scale(arr1[0]);
+                        x_right = x_scale((arr1[0] + arr1[1]) / 2);
+                    } else if (d.i === arr1.length - 1) {
+                        x_left = x_scale((arr1[arr1.length - 2] + arr1[arr1.length - 1]) / 2);
+                        x_right = x_scale(arr1[arr1.length - 1]);
+                    } else {
+                        x_left = x_scale((arr1[d.i - 1] + arr1[d.i]) / 2);
+                        x_right = x_scale((arr1[d.i] + arr1[d.i + 1]) / 2);
+                    }
+                    return Math.abs(x_right - x_left);
+                })
+                .attr('height', d => {
+                    // Height based on midpoints between adjacent cells
+                    let y_top, y_bottom;
+                    if (d.j === 0) {
+                        y_top = y_scale(arr2[0]);
+                        y_bottom = y_scale((arr2[0] + arr2[1]) / 2);
+                    } else if (d.j === arr2.length - 1) {
+                        y_top = y_scale((arr2[arr2.length - 2] + arr2[arr2.length - 1]) / 2);
+                        y_bottom = y_scale(arr2[arr2.length - 1]);
+                    } else {
+                        y_top = y_scale((arr2[d.j] + arr2[d.j + 1]) / 2);
+                        y_bottom = y_scale((arr2[d.j - 1] + arr2[d.j]) / 2);
+                    }
+                    return Math.abs(y_bottom - y_top);
+                })
                 .style('fill', d => {
                     const normalized_value = (d.value - current_range[0]) / (current_range[1] - current_range[0]);
                     const rgb = evaluate_cmap(normalized_value, current_colormap, false);
@@ -801,37 +822,37 @@ function gpdVis() {
             
             // Add X axis
             const x_axis = d3.axisBottom(x_scale).ticks(5);
-            svg.append("g")
+            zoom_group.append("g")
                 .attr("transform", `translate(0,${square_size})`)
                 .call(x_axis)
                 .selectAll("text")
                 .style("fill", "white");
-            svg.selectAll(".tick line").attr("stroke", "white");
-            svg.selectAll(".domain").attr("stroke", "white");
+            zoom_group.selectAll(".tick line").attr("stroke", "white");
+            zoom_group.selectAll(".domain").attr("stroke", "white");
 
             // Add Y axis
             const y_axis = d3.axisLeft(y_scale).ticks(5);
-            svg.append("g")
+            zoom_group.append("g")
                 .call(y_axis)
                 .selectAll("text")
                 .style("fill", "white");
-            svg.selectAll(".tick line").attr("stroke", "white");
-            svg.selectAll(".domain").attr("stroke", "white");
+            zoom_group.selectAll(".tick line").attr("stroke", "white");
+            zoom_group.selectAll(".domain").attr("stroke", "white");
 
             // Axis labels
-            svg.append('text')
+            zoom_group.append('text')
                 .attr('x', square_size + 10)
                 .attr('y', square_size + 15)
                 .attr('text-anchor', 'start')
-                .attr('font-size', '20px')
+                .attr('font-size', '24px')
                 .attr('font-weight', 'bold')
                 .attr('fill', 'white')
                 .text(axis_labels[axis1]);
-            svg.append('text')
+            zoom_group.append('text')
                 .attr('x', -10)
                 .attr('y', -5)
                 .attr('text-anchor', 'end')
-                .attr('font-size', '20px')
+                .attr('font-size', '24px')
                 .attr('font-weight', 'bold')
                 .attr('fill', 'white')
                 .text(axis_labels[axis2]);
@@ -839,6 +860,161 @@ function gpdVis() {
             if (!heatmap_container.contains(colorbar_container)) {
                 heatmap_container.appendChild(colorbar_container);
             }
+        }
+
+        function drawHeatmapInterpolation() {
+            heatmap_container.innerHTML = '';
+            heatmap_container.style.background = current_background;
+            const axis1 = chosen_vars[0];
+            const axis2 = chosen_vars[1];
+            const arr1 = x_xi_t_Q2_array[axis1];
+            const arr2 = x_xi_t_Q2_array[axis2];
+
+            const dataGrid = [];
+            for (let j = 0; j < arr2.length; j++) {
+                const row = [];
+                for (let i = 0; i < arr1.length; i++) {
+                    let query_index = [0, 0, 0, 0];
+                    query_index[axis1] = i;
+                    query_index[axis2] = j;
+                    query_index[remaining_vars[0]] = control_index[0];
+                    query_index[remaining_vars[1]] = control_index[1];
+                    const value = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                    row.push(value);
+                }
+                dataGrid.push(row);
+            }
+
+            const bilinearInterpolate = (x, y) => {
+                let i = d3.bisectLeft(arr1, x) - 1;
+                let j = d3.bisectLeft(arr2, y) - 1;
+                i = Math.max(0, Math.min(i, arr1.length - 2));
+                j = Math.max(0, Math.min(j, arr2.length - 2));
+
+                const x1 = arr1[i], x2 = arr1[i + 1];
+                const y1 = arr2[j], y2 = arr2[j + 1];
+
+                const q11 = dataGrid[j][i];
+                const q12 = dataGrid[j + 1][i];
+                const q21 = dataGrid[j][i + 1];
+                const q22 = dataGrid[j + 1][i + 1];
+
+                const r1 = ((x2 - x) / (x2 - x1)) * q11 + ((x - x1) / (x2 - x1)) * q21;
+                const r2 = ((x2 - x) / (x2 - x1)) * q12 + ((x - x1) / (x2 - x1)) * q22;
+
+                return ((y2 - y) / (y2 - y1)) * r1 + ((y - y1) / (y2 - y1)) * r2;
+            };
+
+            const margin = {top: 30, right: 50, bottom: 30, left: 30};
+            const container_width = heatmap_container.clientWidth - margin.left - margin.right;
+            const container_height = heatmap_container.clientHeight - margin.top - margin.bottom;
+            const square_size = Math.min(container_width, container_height);
+            const total_svg_width = heatmap_container.clientWidth;
+            const square_with_margins = square_size + margin.left + margin.right;
+            const horizontal_offset = (total_svg_width - square_with_margins) / 2;
+
+            const svg = d3.select(heatmap_container)
+                .append('svg')
+                .attr('width', total_svg_width)
+                .attr('height', square_size + margin.top + margin.bottom)
+                .style('display', 'block');
+
+            const zoom_group = svg.append('g')
+                .attr('transform', `translate(${margin.left + horizontal_offset},${margin.top})`);
+
+            const x_scale = d3.scaleLinear().domain(d3.extent(arr1)).range([0, square_size]);
+            const y_scale = d3.scaleLinear().domain(d3.extent(arr2)).range([square_size, 0]);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 25;
+            canvas.height = 25;
+            const context = canvas.getContext('2d');
+            const imageData = context.createImageData(canvas.width, canvas.height);
+
+            const x_map = d3.scaleLinear().domain([0, 25 - 1]).range(x_scale.domain());
+            const y_map = d3.scaleLinear().domain([0, 25 - 1]).range(y_scale.domain());
+
+            for (let py = 0; py < 25; py++) {
+                for (let px = 0; px < 25; px++) {
+                    const x = x_map(px);
+                    const y = y_map(py);
+                    const value = bilinearInterpolate(x, y);
+                    const normalized = (value - current_range[0]) / (current_range[1] - current_range[0] || 1);
+                    const rgb = evaluate_cmap(normalized, current_colormap, false);
+                    const index = (py * 25 + px) * 4;
+                    imageData.data[index] = rgb[0];
+                    imageData.data[index + 1] = rgb[1];
+                    imageData.data[index + 2] = rgb[2];
+                    imageData.data[index + 3] = 255;
+                }
+            }
+            context.putImageData(imageData, 0, 0);
+
+            zoom_group.append('image')
+                .attr('x', 0)
+                .attr('y', 0)
+                .attr('width', square_size)
+                .attr('height', square_size)
+                .attr('preserveAspectRatio', 'none')
+                .attr('image-rendering', 'pixelated') // Use 'auto' for smoother look, 'pixelated' for sharp
+                .attr('href', canvas.toDataURL());
+
+            const x_axis = d3.axisBottom(x_scale);
+            const y_axis = d3.axisLeft(y_scale);
+
+            zoom_group.append('g').attr('transform', `translate(0,${square_size})`).call(x_axis).selectAll('text').style('fill', 'white');
+            zoom_group.append('g').call(y_axis).selectAll('text').style('fill', 'white');
+            zoom_group.selectAll('.domain, .tick line').style('stroke', 'white');
+
+            // Axis labels - matching drawHeatmapAllValues style
+            zoom_group.append('text')
+                .attr('x', square_size + 10)
+                .attr('y', square_size + 15)
+                .attr('text-anchor', 'start')
+                .attr('font-size', '24px')
+                .attr('font-weight', 'bold')
+                .attr('fill', 'white')
+                .text(axis_labels[axis1]);
+            zoom_group.append('text')
+                .attr('x', -10)
+                .attr('y', -5)
+                .attr('text-anchor', 'end')
+                .attr('font-size', '24px')
+                .attr('font-weight', 'bold')
+                .attr('fill', 'white')
+                .text(axis_labels[axis2]);
+
+            const tooltip = d3.select(heatmap_container)
+                .append('div')
+                .style('opacity', 0)
+                .attr('class', 'heatmap-tooltip')
+                .style('position', 'absolute')
+                .style('background-color', 'rgba(0, 0, 0, 0.8)')
+                .style('color', 'white')
+                .style('border-radius', '5px')
+                .style('padding', '8px')
+                .style('font-size', '12px')
+                .style('pointer-events', 'none');
+
+            zoom_group.append('rect')
+                .attr('width', square_size)
+                .attr('height', square_size)
+                .style('fill', 'none')
+                .style('pointer-events', 'all')
+                .on('mouseover', () => tooltip.style('opacity', 1))
+                .on('mouseout', () => tooltip.style('opacity', 0))
+                .on('mousemove', (event) => {
+                    const [mx, my] = d3.pointer(event);
+                    const x = x_scale.invert(mx);
+                    const y = y_scale.invert(my);
+                    const value = bilinearInterpolate(x, y);
+                    tooltip
+                        .html(`GPD: ${value.toFixed(4)}<br>${axis_labels[axis1]}: ${x.toFixed(4)}<br>${axis_labels[axis2]}: ${y.toFixed(4)}`)
+                        .style('left', (event.pageX + 15) + 'px')
+                        .style('top', (event.pageY - 28) + 'px');
+                });
+
+            moveColorbarToCurrentView();
         }
 
         function updateCurrentRange() {
@@ -870,6 +1046,7 @@ function gpdVis() {
                 three_container.style.display = 'none';
                 heatmap_container.style.display = 'block';
                 heatmap_container.style.background = current_background;
+                if(heatmap_controls) heatmap_controls.style.display = 'flex';
                 drawHeatmap();
                 // Disable multi-surface controls in 2D view
                 if (multi_surface_btn1) multi_surface_btn1.disabled = true;
@@ -878,6 +1055,7 @@ function gpdVis() {
             } else {
                 three_container.style.display = 'block';
                 heatmap_container.style.display = 'none';
+                if(heatmap_controls) heatmap_controls.style.display = 'none';
                 if (renderer) renderer.setClearColor(current_background);
                 // Enable multi-surface controls in 3D view
                 if (multi_surface_btn1) multi_surface_btn1.disabled = false;
@@ -1143,6 +1321,12 @@ function gpdVis() {
             axis_camera.zoom = 1;
             axis_camera.updateProjectionMatrix();
             
+            // Reset heatmap zoom
+            heatmap_zoom_transform = null;
+            if (is_2d_view) {
+                drawHeatmap(); // Redraw heatmap to apply zoom reset
+            }
+            
             applyBackground(current_background);
             updateSceneInfo('View reset to default');
         }
@@ -1388,32 +1572,34 @@ function gpdVis() {
         }
     
         if (toggle_view_btn) {
-            toggle_view_btn.addEventListener('click', function() {
+            toggle_view_btn.addEventListener('click', () => {
                 is_2d_view = !is_2d_view;
                 toggle_view_btn.innerHTML = is_2d_view
                     ? '<i class="fas fa-globe me-1"></i>3D View'
                     : '<i class="fas fa-map me-1"></i>2D Heatmap';
-                updateSceneInfo(is_2d_view ? "Switched to 2D heatmap" : "Switched to 3D view");
-                updateViewMode();
-                if (!is_2d_view) {
+                
+                if (is_2d_view) {
+                    // Save 3D camera state
+                    camera_3d_state = {
+                        position: camera.position.clone(),
+                        quaternion: camera.quaternion.clone(),
+                        up: camera.up.clone()
+                    };
+                    three_container.style.display = 'none';
+                    heatmap_container.style.display = 'block';
+                    heatmap_controls.style.display = 'flex';
+                    drawHeatmap();
+                } else {
+                    three_container.style.display = 'block';
+                    heatmap_container.style.display = 'none';
+                    heatmap_controls.style.display = 'none';
                     // Restore 3D camera state
                     if (camera_3d_state.position) {
-                        camera.up.copy(camera_3d_state.up);
                         camera.position.copy(camera_3d_state.position);
                         camera.quaternion.copy(camera_3d_state.quaternion);
-                        controls.target.copy(camera_3d_state.target);
-                    } else {
-                        resetView();
+                        camera.up.copy(camera_3d_state.up);
+                        controls.update();
                     }
-                    controls.noRotate = false;
-                    controls.update();
-                } else {
-                    // Save current 3D camera state
-                    camera_3d_state.up = camera.up.clone();
-                    camera_3d_state.position = camera.position.clone();
-                    camera_3d_state.quaternion = camera.quaternion.clone();
-                    camera_3d_state.target = controls.target.clone();
-                    controls.noRotate = true;
                 }
             });
         }
@@ -1474,6 +1660,13 @@ function gpdVis() {
                 }
                 // Also update colorbar
                 updateColorbar(current_range[0], current_range[1], current_colormap);
+            });
+        }
+
+        if (heatmap_method_select) {
+            heatmap_method_select.addEventListener('change', (e) => {
+                heatmap_method = e.target.value;
+                drawHeatmap();
             });
         }
 

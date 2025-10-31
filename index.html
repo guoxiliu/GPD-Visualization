@@ -250,6 +250,13 @@
                                     <button id="reset-view-btn" class="btn btn-outline-secondary btn-sm ms-2">
                                         <i class="fas fa-rotate-right me-1"></i> Reset View
                                     </button>
+                                    <div id="heatmap-controls" class="align-items-center ms-2" style="display: none;">
+                                        <span class="text-muted mx-2 fw-semibold">Heatmap plotting</span>
+                                        <select id="heatmap-method-select" class="form-select form-select-sm" style="width: auto;">
+                                            <option value="all_values" selected>All Values</option>
+                                            <option value="interpolation">Interpolation</option>
+                                        </select>
+                                    </div>
                                 </div>
                                 <div class="text-muted small me-2">
                                     <span id="scene-info">Ready</span>
@@ -275,7 +282,7 @@
                                 </div>
                                 <span class="text-muted mx-2 fw-semibold">Background</span>
                                 <div class="dropdown">
-                                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle d-flex align-items-center ms-1" type="button" id="bg-dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle d-flex align-items-center" type="button" id="bg-dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
                                         <span class="bg-swatch" style="background: #52576e;"></span>
                                         <span class="ms-2">Graphite</span>
                                     </button>
