@@ -66,6 +66,8 @@ const heatmap_method_select = document.getElementById('heatmap-method-select');
 const heatmap_controls = document.getElementById('heatmap-controls');
 let heatmap_method = 'all_values'; // 'all_values' or 'interpolation'
 
+const zero_plane_select = document.getElementById('zero-plane-select');
+let current_zero_plane = zero_plane_select.value; // 'none', 'gray', 'checkerboard', 'wireframe'
 const colorbar_container = document.getElementById('colorbar-container');
 const three_container = document.getElementById("three-container");
 const heatmap_container = document.getElementById('heatmap-container');
@@ -261,7 +263,6 @@ function gpdVis() {
             x[i] = x_grid.get(i, xi_initial_idx);
         }
         
-        
         var x_xi_t_Q2_array = [x, xi, t, Q2];
 
         // Get the global min/max of the x_grid for correct normalization
@@ -313,7 +314,9 @@ function gpdVis() {
         // Use MeshBasicMaterial so lighting does not affect the color
         let material = new THREE.MeshBasicMaterial({
             vertexColors: true,    // Use per-vertex color from colormap
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.95
         });
         let axis_camera = new THREE.OrthographicCamera(-2, 2, 2, -2, -1000, 1000);
 
@@ -1184,6 +1187,116 @@ function gpdVis() {
             }, 200);
         }
 
+        function createWireframeGeometry(width, height, segmentsX, segmentsY) {
+            const geometry = new THREE.PlaneGeometry(width, height, segmentsX, segmentsY);
+            const wireframeGeometry = new THREE.WireframeGeometry(geometry);
+            return wireframeGeometry;
+        }
+
+        function createCheckerboardCanvas(color1, color2, size = 2) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const context = canvas.getContext('2d');
+            
+            // Draw color1 as background
+            context.fillStyle = color1;
+            context.fillRect(0, 0, size, size);
+
+            // Draw color2 for alternating squares
+            context.fillStyle = color2;
+            const step = size / 2;
+            context.fillRect(0, 0, step, step);
+            context.fillRect(step, step, step, step);
+
+            return canvas;
+        }
+
+        function updateZeroPlane(type) {
+            if (!scene) return;
+
+            // Remove the existing zero plane
+            if (scene.__zeroPlane) {
+                scene.remove(scene.__zeroPlane);
+                scene.__zeroPlane.geometry.dispose();
+                if (scene.__zeroPlane.material.map) {
+                    scene.__zeroPlane.material.map.dispose();
+                }
+                scene.__zeroPlane.material.dispose();
+                scene.__zeroPlane = null;
+            }
+
+            if (type === 'none') return;
+
+            let zeroPlaneGeometry, zeroPlaneMaterial, zeroPlane;
+            let zeroPlaneOpacity = 0.3;
+
+            switch (type) {
+                case 'gray':
+                    zeroPlaneGeometry = new THREE.PlaneGeometry(1.1, 1.1);
+                    zeroPlaneMaterial = new THREE.MeshBasicMaterial({
+                        color: 0x888888,
+                        transparent: true,
+                        opacity: zeroPlaneOpacity,
+                        side: THREE.DoubleSide,
+                    });
+                    zeroPlane = new THREE.Mesh(zeroPlaneGeometry, zeroPlaneMaterial);
+                    break;
+                case 'checkerboard':
+                    zeroPlaneGeometry = new THREE.PlaneGeometry(1.1, 1.1);
+                    const checkerboardCanvas = createCheckerboardCanvas('#cccccc', '#999999', 2);
+                    const checkerboardTexture = new THREE.CanvasTexture(checkerboardCanvas);
+                    checkerboardTexture.wrapS = THREE.RepeatWrapping;
+                    checkerboardTexture.wrapT = THREE.RepeatWrapping;
+                    checkerboardTexture.repeat.set(5, 5);
+                    checkerboardTexture.magFilter = THREE.NearestFilter;
+
+                    zeroPlaneMaterial = new THREE.MeshBasicMaterial({
+                        map: checkerboardTexture,
+                        transparent: true,
+                        opacity: zeroPlaneOpacity,
+                        side: THREE.DoubleSide,
+                    });
+                    zeroPlane = new THREE.Mesh(zeroPlaneGeometry, zeroPlaneMaterial);
+                    break;
+                case 'wireframe':
+                    zeroPlaneGeometry = createWireframeGeometry(1.1, 1.1, 8, 8);
+                    zeroPlaneMaterial = new THREE.LineBasicMaterial({
+                        color: 0x888888,
+                        linewidth: 1,
+                        transparent: true,
+                        opacity: zeroPlaneOpacity,
+                    });
+                    zeroPlane = new THREE.LineSegments(zeroPlaneGeometry, zeroPlaneMaterial);
+                    break;
+            }
+
+            if (zeroPlane) {
+                zeroPlane.position.set(0.5, 0.5, 0.0001); // Position it a little bit off z=0 to avoid z-flighting
+                zeroPlane.renderOrder = -1; // Render before the main surface to avoid z-fighting issues
+                scene.add(zeroPlane);
+                scene.__zeroPlane = zeroPlane;
+            }
+        }
+
+        function cleanupScene() {
+            if (!scene) return;
+            scene.traverse(object => {
+                if (object.isMesh || object.isLineSegments) {
+                    if (object.geometry) {
+                        object.geometry.dispose();
+                    }
+                    if (object.material) {
+                        if (Array.isArray(object.material)) {
+                            object.material.forEach(material => material.dispose());
+                        } else {
+                            object.material.dispose();
+                        }
+                    }
+                }
+            });
+        }
+
         // Standalone function to render the 3D scene
         function render3DScene() {
             // Main scene rendering
@@ -1230,6 +1343,7 @@ function gpdVis() {
                     },
                 });
     
+                cleanupScene(); // Dispose of old scene objects before creating a new one
                 scene = new THREE.Scene();
                 geometry = new THREE.PlaneGeometry(1, 1, arrays1[0].length - 1, arrays1[1].length - 1);
                 let plane = new THREE.Mesh(geometry, material);
@@ -1248,20 +1362,8 @@ function gpdVis() {
                 scene.add(y_label);
                 scene.add(plane);
 
-                // Add a reference plane to show where GPD=0 is
-                let referencePlaneGeometry = new THREE.PlaneGeometry(1, 1);
-                let referencePlaneMaterial = new THREE.MeshBasicMaterial({
-                    color: 0xaaaaaa,
-                    transparent: true,
-                    opacity: 0.5,
-                    side: THREE.DoubleSide,
-                    // polygonOffset: true,
-                    // polygonOffsetFactor: -1.0,
-                    // polygonOffsetUnits: -4.0
-                });
-                let referencePlane = new THREE.Mesh(referencePlaneGeometry, referencePlaneMaterial);
-                referencePlane.position.set(0.5, 0.5, -0.0001); // Center at the middle of the XY plane
-                scene.add(referencePlane);
+                // Add a zero plane to show where GPD=0 is
+                updateZeroPlane(current_zero_plane);
                 
                 drawAxisTicks(scene, 'z', current_range[0], current_range[1], 4, [min_axis1, max_axis1], [min_axis2, max_axis2]);
                 drawAxisTicks(scene, 'x', min_axis1, max_axis1);
@@ -1286,6 +1388,7 @@ function gpdVis() {
                     
                     if (is_x_xi_plot) {
                         // Use the 2D x_grid for correct x values at each ξ
+                        console.log("This is x vs ξ plot, using x_grid for x values.");
                         if (chosen_vars[0] === 0) { // x is axis1, ξ is axis2
                             const x_val = x_grid.get(axis1_index, axis2_index);
                             axis1_value = (x_val - min_x_global) / (max_x_global - min_x_global);
@@ -1431,7 +1534,6 @@ function gpdVis() {
                 if (control_index[0] !== value) {
                     control_index[0] = value;
                     slider_changed = true;
-                    document.getElementById('slider1-value').textContent = arrays2[0][value].toFixed(3);
                     
                     // If slider 1 controls xi, update the x array
                     if (remaining_vars[0] === 1) { // 1 is the index for xi
@@ -1469,7 +1571,6 @@ function gpdVis() {
                 if (control_index[1] !== value) {
                     control_index[1] = value;
                     slider_changed = true;
-                    document.getElementById('slider2-value').textContent = arrays2[1][value].toFixed(3);
 
                     // If slider 2 controls xi, update the x array
                     if (remaining_vars[1] === 1) { // 1 is the index for xi
@@ -1607,7 +1708,11 @@ function gpdVis() {
                 multi_surface_btn2.classList.add('btn-outline-secondary');
             }
             if (scene && scene.__multiSurfaces) {
-                scene.__multiSurfaces.forEach(m => scene.remove(m));
+                scene.__multiSurfaces.forEach(m => {
+                    if (m.geometry) m.geometry.dispose();
+                    if (m.material) m.material.dispose();
+                    scene.remove(m);
+                });
                 scene.__multiSurfaces = [];
                 renderer.render(scene, camera);
             }
@@ -1771,6 +1876,13 @@ function gpdVis() {
             heatmap_method_select.addEventListener('change', (e) => {
                 heatmap_method = e.target.value;
                 drawHeatmap();
+            });
+        }
+
+        if (zero_plane_select) {
+            zero_plane_select.addEventListener('change', (e) => {
+                current_zero_plane = e.target.value;
+                updateZeroPlane(current_zero_plane);
             });
         }
 
