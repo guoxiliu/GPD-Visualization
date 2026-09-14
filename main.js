@@ -26,12 +26,17 @@ let control_index = [0, 0];
 //     { name: "Q² values", path: "data/Q2.npy", key: 'Q2', type: 'npy' },
 //     { name: "GPD data", path: "data/gpd_4d.npy", key: 'gpd_4d', type: 'npy' },
 // ];
+// In production (GitHub Pages), use the hosted dataset URL. In local development, use local file.
+const GPD_DATA_PATH = import.meta.env.PROD
+    ? "https://huggingface.co/datasets/guoxiliu/GPD-data/resolve/main/gpd_x_xi_t_Q2_r_small_3r.npy"
+    : "data_new/gpd_x_xi_t_Q2_r_small.npy";
+
 let data_files = [
     { name: "x values", path: "data_new/x_grid.npy", key: 'x', type: 'npy' },
     { name: "ξ values", path: "data_new/xi_array.npy", key: 'xi', type: 'npy' },
     { name: "t values", path: "data_new/t_array.npy", key: 't', type: 'npy' },
     { name: "Q² values", path: "data_new/Q2_array.npy", key: 'Q2', type: 'npy' },
-    { name: "GPD data", path: "data_new/gpd_x_xi_t_Q2_r_small.npy", key: 'gpd_4d', type: 'npy' },
+    { name: "GPD data", path: GPD_DATA_PATH, key: 'gpd_4d', type: 'npy' },
 ];
 let multi_surface_active = null; // null, 0, or 1
 let start_slider_at_middle = false;
@@ -49,7 +54,6 @@ const slider2 = document.getElementById('slider2');
 
 const multi_surface_btn1 = document.getElementById('multi-surface1');
 const multi_surface_btn2 = document.getElementById('multi-surface2');
-const num_surfaces_input = document.getElementById('num-surfaces-input');
 
 const play_slider_btn1 = document.getElementById('play-slider1');
 const play_slider_btn2 = document.getElementById('play-slider2');
@@ -202,13 +206,14 @@ function loadDataFiles() {
 }
 
 function gpdVis() {
-    let renderer, scene, min_gpd = Number.MAX_VALUE, max_gpd = Number.MIN_VALUE;
+    let renderer, scene, min_gpd = Infinity, max_gpd = -Infinity;
     let base_color = 'white';
     let use_local_range = false;
     
     Promise.all(loadDataFiles())
     .then(([x_grid_flat, xi, t, Q2, gpd_5d_flat]) => {
         
+        x_grid_flat = new Float64Array(x_grid_flat);
         xi = new Float64Array(xi);
         t = new Float64Array(t);
         Q2 = new Float64Array(Q2);
@@ -289,9 +294,9 @@ function gpdVis() {
         document.querySelectorAll('.colorbar-labels')[1].textContent = `${min_gpd.toFixed(3)}`;
     
         let camera = new THREE.PerspectiveCamera(75, three_container.clientWidth / three_container.clientHeight, 0.1, 1000);
-        camera.position.set(0.147, -0.898, 0.165);
-        camera.quaternion.set(0.658, -0.102, -0.070, 0.743);
-        camera.up.set(-0.094, -0.145, 0.985);
+        camera.position.set(0.737, -0.840, 0.108);
+        camera.quaternion.set(0.676, 0.057, 0.067, 0.732);
+        camera.up.set(0.027, -0.196, 0.980);
     
         renderer = new THREE.WebGLRenderer({antialias:true});
         renderer.setClearColor(current_background);
@@ -406,12 +411,18 @@ function gpdVis() {
         }
 
         function drawZAxis(scene, minVal, maxVal, x_range = [0,1], y_range = [0,1]) {
-            // Remove previous z-axis line and label
+            // Remove and dispose previous z-axis line and label
             if (scene.__zAxisLine) {
+                if (scene.__zAxisLine.geometry) scene.__zAxisLine.geometry.dispose();
+                if (scene.__zAxisLine.material) scene.__zAxisLine.material.dispose();
                 scene.remove(scene.__zAxisLine);
                 scene.__zAxisLine = null;
             }
             if (scene.__zAxisLabel) {
+                if (scene.__zAxisLabel.material) {
+                    if (scene.__zAxisLabel.material.map) scene.__zAxisLabel.material.map.dispose();
+                    scene.__zAxisLabel.material.dispose();
+                }
                 scene.remove(scene.__zAxisLabel);
                 scene.__zAxisLabel = null;
             }
@@ -453,11 +464,11 @@ function gpdVis() {
                 // Axis starts at zero, zStart = 0
                 return (max_val === 0) ? z_start : z_start + (z_end - z_start) * (val / (max_val || 1));
             } else if (max_val <= 0) {
-                // Axis ends at zero, zEnd = 0
-                return (min_val === 0) ? z_end : z_start + (z_end - z_start) * (val / (min_val || 1));
+                // Axis ends at zero, zEnd = 0, zStart = -0.5 (most negative)
+                return (min_val === 0) ? z_end : z_start + (z_end - z_start) * ((val - min_val) / (-min_val || 1));
             } else {
                 // Axis crosses zero
-                return z_start + (z_end - z_start) * ((val - min_val) / (max_val - min_val));
+                return z_start + (z_end - z_start) * ((val - min_val) / ((max_val - min_val) || 1));
             }
         }
 
@@ -554,12 +565,12 @@ function gpdVis() {
         }
 
         function getExtrema(arr){
-            let maxv = Number.MIN_VALUE;
-            let minv = Number.MAX_VALUE;
+            let maxv = -Infinity;
+            let minv = Infinity;
             arr.forEach(val => {
-                maxv = Math.max(maxv, val)
-                minv = Math.min(minv, val)
-            })
+                maxv = Math.max(maxv, val);
+                minv = Math.min(minv, val);
+            });
             return [minv, maxv];
         }
 
@@ -599,6 +610,8 @@ function gpdVis() {
             if (labels.length >= 2) {
                 labels[0].textContent = max.toFixed(3);
                 labels[1].textContent = min.toFixed(3);
+                labels[0].style.color = base_color;
+                labels[1].style.color = base_color;
             }
             
             // Clear existing intermediate ticks and labels
@@ -633,7 +646,7 @@ function gpdVis() {
                     tick.style.bottom = `${position}%`;
                     tick.style.width = '8px';
                     tick.style.height = '1px';
-                    tick.style.backgroundColor = 'white';
+                    tick.style.backgroundColor = base_color;
                     tick.style.transform = 'translateY(50%)';
                     
                     // Create tick label
@@ -642,7 +655,7 @@ function gpdVis() {
                     tickLabel.style.position = 'absolute';
                     tickLabel.style.right = '105%';
                     tickLabel.style.bottom = `${position}%`;
-                    tickLabel.style.color = 'white';
+                    tickLabel.style.color = base_color;
                     tickLabel.style.fontSize = '10px';
                     tickLabel.style.transform = 'translateY(50%)';
                     tickLabel.style.whiteSpace = 'nowrap';
@@ -677,7 +690,8 @@ function gpdVis() {
         }
 
         function drawHeatmapAllValues() {
-            heatmap_container.innerHTML = '';
+            // Clear previous heatmap elements (SVG and tooltip) without removing colorbar_container
+            heatmap_container.querySelectorAll('svg, .heatmap-tooltip').forEach(el => el.remove());
             heatmap_container.style.background = current_background;
             const axis1 = chosen_vars[0];
             const axis2 = chosen_vars[1];
@@ -756,16 +770,18 @@ function gpdVis() {
                 .style('padding', '8px')
                 .style('font-size', '12px')
                 .style('pointer-events', 'none')
-                .style('z-index', '1000');
+                .style('z-index', '10');
             
-            // Build X and Y scales
-            const x_scale = d3.scaleLinear();
-            x_scale.domain(d3.extent(arr1)).range([0, square_size]);
-
-            const y_scale = d3.scaleLinear();
-            y_scale.domain(d3.extent(arr2)).range([square_size, 0]);
+            // Create scales based on actual data values
+            const x_scale = d3.scaleLinear()
+                .domain([d3.min(arr1), d3.max(arr1)])
+                .range([0, square_size]);
             
-            // Tooltip event handlers
+            const y_scale = d3.scaleLinear()
+                .domain([d3.min(arr2), d3.max(arr2)])
+                .range([square_size, 0]);
+            
+            // Mouse events for tooltip
             const mouseover = function(event, d) {
                 tooltip.style('opacity', 1);
             };
@@ -890,18 +906,18 @@ function gpdVis() {
                 .attr("transform", `translate(0,${square_size})`)
                 .call(x_axis)
                 .selectAll("text")
-                .style("fill", "white");
-            zoom_group.selectAll(".tick line").attr("stroke", "white");
-            zoom_group.selectAll(".domain").attr("stroke", "white");
+                .style("fill", base_color);
+            zoom_group.selectAll(".tick line").attr("stroke", base_color);
+            zoom_group.selectAll(".domain").attr("stroke", base_color);
 
             // Add Y axis
             const y_axis = d3.axisLeft(y_scale).ticks(5);
             zoom_group.append("g")
                 .call(y_axis)
                 .selectAll("text")
-                .style("fill", "white");
-            zoom_group.selectAll(".tick line").attr("stroke", "white");
-            zoom_group.selectAll(".domain").attr("stroke", "white");
+                .style("fill", base_color);
+            zoom_group.selectAll(".tick line").attr("stroke", base_color);
+            zoom_group.selectAll(".domain").attr("stroke", base_color);
 
             // Axis labels
             zoom_group.append('text')
@@ -910,7 +926,7 @@ function gpdVis() {
                 .attr('text-anchor', 'start')
                 .attr('font-size', '24px')
                 .attr('font-weight', 'bold')
-                .attr('fill', 'white')
+                .attr('fill', base_color)
                 .text(axis_labels[axis1]);
             zoom_group.append('text')
                 .attr('x', -10)
@@ -918,7 +934,7 @@ function gpdVis() {
                 .attr('text-anchor', 'end')
                 .attr('font-size', '24px')
                 .attr('font-weight', 'bold')
-                .attr('fill', 'white')
+                .attr('fill', base_color)
                 .text(axis_labels[axis2]);
 
             if (!heatmap_container.contains(colorbar_container)) {
@@ -927,7 +943,8 @@ function gpdVis() {
         }
 
         function drawHeatmapInterpolation() {
-            heatmap_container.innerHTML = '';
+            // Clear previous heatmap elements (SVG and tooltip) without removing colorbar_container
+            heatmap_container.querySelectorAll('svg, .heatmap-tooltip').forEach(el => el.remove());
             heatmap_container.style.background = current_background;
             const axis1 = chosen_vars[0];
             const axis2 = chosen_vars[1];
@@ -986,6 +1003,18 @@ function gpdVis() {
             const zoom_group = svg.append('g')
                 .attr('transform', `translate(${margin.left + horizontal_offset},${margin.top})`);
 
+            // Attach zoom behavior
+            const zoom_behavior = d3.zoom()
+                .scaleExtent([0.5, 10])
+                .on('zoom', (event) => {
+                    zoom_group.attr('transform', `translate(${margin.left + horizontal_offset},${margin.top}) ${event.transform}`);
+                    heatmap_zoom_transform = event.transform;
+                });
+            svg.call(zoom_behavior);
+            if (heatmap_zoom_transform) {
+                svg.call(zoom_behavior.transform, heatmap_zoom_transform);
+            }
+
             const x_scale = d3.scaleLinear().domain(d3.extent(arr1)).range([0, square_size]);
             const y_scale = d3.scaleLinear().domain(d3.extent(arr2)).range([square_size, 0]);
 
@@ -996,7 +1025,8 @@ function gpdVis() {
             const imageData = context.createImageData(canvas.width, canvas.height);
 
             const x_map = d3.scaleLinear().domain([0, 25 - 1]).range(x_scale.domain());
-            const y_map = d3.scaleLinear().domain([0, 25 - 1]).range(y_scale.domain());
+            // Map py=0 (top) to max(arr2) and py=24 (bottom) to min(arr2) to match cartesian y-axis
+            const y_map = d3.scaleLinear().domain([0, 25 - 1]).range([y_scale.domain()[1], y_scale.domain()[0]]);
 
             for (let py = 0; py < 25; py++) {
                 for (let px = 0; px < 25; px++) {
@@ -1026,9 +1056,9 @@ function gpdVis() {
             const x_axis = d3.axisBottom(x_scale);
             const y_axis = d3.axisLeft(y_scale);
 
-            zoom_group.append('g').attr('transform', `translate(0,${square_size})`).call(x_axis).selectAll('text').style('fill', 'white');
-            zoom_group.append('g').call(y_axis).selectAll('text').style('fill', 'white');
-            zoom_group.selectAll('.domain, .tick line').style('stroke', 'white');
+            zoom_group.append('g').attr('transform', `translate(0,${square_size})`).call(x_axis).selectAll('text').style('fill', base_color);
+            zoom_group.append('g').call(y_axis).selectAll('text').style('fill', base_color);
+            zoom_group.selectAll('.domain, .tick line').style('stroke', base_color);
 
             // Axis labels - matching drawHeatmapAllValues style
             zoom_group.append('text')
@@ -1037,7 +1067,7 @@ function gpdVis() {
                 .attr('text-anchor', 'start')
                 .attr('font-size', '24px')
                 .attr('font-weight', 'bold')
-                .attr('fill', 'white')
+                .attr('fill', base_color)
                 .text(axis_labels[axis1]);
             zoom_group.append('text')
                 .attr('x', -10)
@@ -1045,7 +1075,7 @@ function gpdVis() {
                 .attr('text-anchor', 'end')
                 .attr('font-size', '24px')
                 .attr('font-weight', 'bold')
-                .attr('fill', 'white')
+                .attr('fill', base_color)
                 .text(axis_labels[axis2]);
 
             const tooltip = d3.select(heatmap_container)
@@ -1058,7 +1088,8 @@ function gpdVis() {
                 .style('border-radius', '5px')
                 .style('padding', '8px')
                 .style('font-size', '12px')
-                .style('pointer-events', 'none');
+                .style('pointer-events', 'none')
+                .style('z-index', '10');
 
             zoom_group.append('rect')
                 .attr('width', square_size)
@@ -1072,18 +1103,45 @@ function gpdVis() {
                     const x = x_scale.invert(mx);
                     const y = y_scale.invert(my);
                     const value = bilinearInterpolate(x, y);
+
+                    const container_rect = heatmap_container.getBoundingClientRect();
+                    const mouseX = event.clientX - container_rect.left;
+                    const mouseY = event.clientY - container_rect.top;
+                    const tooltip_offset = 10;
+
                     tooltip
-                        .html(`GPD: ${value.toFixed(4)}<br>${axis_labels[axis1]}: ${x.toFixed(4)}<br>${axis_labels[axis2]}: ${y.toFixed(4)}`)
-                        .style('left', (event.pageX + 15) + 'px')
-                        .style('top', (event.pageY - 28) + 'px');
+                        .html(`GPD: ${value.toFixed(4)}<br>${axis_labels[axis1]}: ${x.toFixed(4)}<br>${axis_labels[axis2]}: ${y.toFixed(4)}`);
+
+                    const tooltip_node = tooltip.node();
+                    const tooltip_width = tooltip_node ? tooltip_node.offsetWidth : 100;
+                    const tooltip_height = tooltip_node ? tooltip_node.offsetHeight : 50;
+
+                    let tooltipX = mouseX + tooltip_offset;
+                    let tooltipY = mouseY + tooltip_offset;
+
+                    if (tooltipX + tooltip_width > heatmap_container.clientWidth) {
+                        tooltipX = mouseX - tooltip_width - tooltip_offset;
+                    }
+                    if (tooltipY + tooltip_height > heatmap_container.clientHeight) {
+                        tooltipY = mouseY - tooltip_height - tooltip_offset;
+                    }
+
+                    tooltipX = Math.max(0, Math.min(tooltipX, heatmap_container.clientWidth - tooltip_width));
+                    tooltipY = Math.max(0, Math.min(tooltipY, heatmap_container.clientHeight - tooltip_height));
+
+                    tooltip
+                        .style('left', tooltipX + 'px')
+                        .style('top', tooltipY + 'px');
                 });
 
-            moveColorbarToCurrentView();
+            if (!heatmap_container.contains(colorbar_container)) {
+                heatmap_container.appendChild(colorbar_container);
+            }
         }
 
         function updateCurrentRange() {
             if (use_local_range) {
-                let curMin = Number.MAX_VALUE, curMax = Number.MIN_VALUE;
+                let curMin = Infinity, curMax = -Infinity;
                 for (let j = 0; j < x_xi_t_Q2_array[chosen_vars[1]].length; j++) {
                     for (let i = 0; i < x_xi_t_Q2_array[chosen_vars[0]].length; i++) {
                         let query_index = [0, 0, 0, 0];
@@ -1115,7 +1173,6 @@ function gpdVis() {
                 // Disable multi-surface controls in 2D view
                 if (multi_surface_btn1) multi_surface_btn1.disabled = true;
                 if (multi_surface_btn2) multi_surface_btn2.disabled = true;
-                if (num_surfaces_input) num_surfaces_input.disabled = true;
             } else {
                 three_container.style.display = 'block';
                 heatmap_container.style.display = 'none';
@@ -1124,7 +1181,11 @@ function gpdVis() {
                 // Enable multi-surface controls in 3D view
                 if (multi_surface_btn1) multi_surface_btn1.disabled = false;
                 if (multi_surface_btn2) multi_surface_btn2.disabled = false;
-                if (num_surfaces_input) num_surfaces_input.disabled = false;
+                // Ensure 3D scene gets updated with any slider movement from 2D view
+                slider_changed = true;
+                if (scene) {
+                    drawAxisTicks(scene, 'z', current_range[0], current_range[1], 4, [min_axis1, max_axis1], [min_axis2, max_axis2]);
+                }
                 // Force resize the renderer after switching to 3D view
                 setTimeout(() => {
                     if (camera && renderer) {
@@ -1140,6 +1201,20 @@ function gpdVis() {
             moveColorbarToCurrentView();
         }
 
+        // Helper to update toggle view button state when animations start or stop
+        function updateToggleViewBtnState() {
+            if (!toggle_view_btn) return;
+            const isPlaying = Boolean(window.slider1Playing || window.slider2Playing);
+            toggle_view_btn.disabled = isPlaying;
+            if (isPlaying) {
+                toggle_view_btn.classList.add('disabled');
+                toggle_view_btn.setAttribute('title', 'View switching is disabled during animation');
+            } else {
+                toggle_view_btn.classList.remove('disabled');
+                toggle_view_btn.removeAttribute('title');
+            }
+        }
+
         function animateSlider(slider, dataArray, idx, playBtn, playingFlag, intervalVar) {
             if (use_local_range) {
                 showNotification('Animation can only play in global range.', 'warning');
@@ -1151,17 +1226,20 @@ function gpdVis() {
                 playBtn.innerHTML = '<i class="fas fa-play"></i>';
                 clearInterval(window[intervalVar]);
                 window[intervalVar] = null;
+                updateToggleViewBtnState();
                 return;
             }
 
             window[playingFlag] = true;
             playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+            updateToggleViewBtnState();
 
             window[intervalVar] = setInterval(() => {
                 if (!window[playingFlag]) {
                     clearInterval(window[intervalVar]);
                     window[intervalVar] = null;
                     playBtn.innerHTML = '<i class="fas fa-play"></i>';
+                    updateToggleViewBtnState();
                     return;
                 }
 
@@ -1173,12 +1251,13 @@ function gpdVis() {
                 control_index[idx] = current;
                 slider_changed = true;
                 slider.noUiSlider.set(current);
-                updateColorbar(min_gpd, max_gpd, current_colormap);
 
-                // Show multiple surfaces if multi-surface mode is active
-                if (multi_surface_active === idx) {
-                    showMultipleSurfaces(idx);
+                // If slider controls xi, update the x array
+                if (remaining_vars[idx] === 1) {
+                    updateXArray(current);
                 }
+
+                updateColorbar(min_gpd, max_gpd, current_colormap);
                 
                 // Update 2D heatmap if in 2D view mode
                 if (is_2d_view) {
@@ -1239,6 +1318,7 @@ function gpdVis() {
                         transparent: true,
                         opacity: zeroPlaneOpacity,
                         side: THREE.DoubleSide,
+                        depthWrite: false,
                     });
                     zeroPlane = new THREE.Mesh(zeroPlaneGeometry, zeroPlaneMaterial);
                     break;
@@ -1256,6 +1336,7 @@ function gpdVis() {
                         transparent: true,
                         opacity: zeroPlaneOpacity,
                         side: THREE.DoubleSide,
+                        depthWrite: false,
                     });
                     zeroPlane = new THREE.Mesh(zeroPlaneGeometry, zeroPlaneMaterial);
                     break;
@@ -1266,14 +1347,15 @@ function gpdVis() {
                         linewidth: 1,
                         transparent: true,
                         opacity: zeroPlaneOpacity,
+                        depthWrite: false,
                     });
                     zeroPlane = new THREE.LineSegments(zeroPlaneGeometry, zeroPlaneMaterial);
                     break;
             }
 
             if (zeroPlane) {
-                zeroPlane.position.set(0.5, 0.5, 0.0001); // Position it a little bit off z=0 to avoid z-flighting
-                zeroPlane.renderOrder = -1; // Render before the main surface to avoid z-fighting issues
+                zeroPlane.position.set(0.5, 0.5, 0.0001); // Position it slightly off z=0
+                zeroPlane.renderOrder = 1; // Render after the main surface so depth testing works properly without occluding geometry behind it
                 scene.add(zeroPlane);
                 scene.__zeroPlane = zeroPlane;
             }
@@ -1411,39 +1493,46 @@ function gpdVis() {
                 controls.update();
             }
     
-            if (slider_changed) {
-                slider_changed = false;
-                let query_index = [0, 0, 0, 0];
-                // Get correct zStart/zEnd from drawZAxis
-                const [zStart, zEnd] = drawZAxis(scene, current_range[0], current_range[1], [min_axis1, max_axis1], [min_axis2, max_axis2]);
+            // Only update 3D mesh and render 3D scene if 3D view is active
+            if (!is_2d_view) {
+                if (slider_changed) {
+                    slider_changed = false;
+                    let query_index = [0, 0, 0, 0];
+                    // Get correct zStart/zEnd from drawZAxis
+                    const [zStart, zEnd] = drawZAxis(scene, current_range[0], current_range[1], [min_axis1, max_axis1], [min_axis2, max_axis2]);
 
-                for (let j = 0; j < arrays1[1].length; j++) {
-                    for (let i = 0; i < arrays1[0].length; i++) {
-                        query_index[chosen_vars[0]] = i;
-                        query_index[chosen_vars[1]] = j;
-                        query_index[remaining_vars[0]] = control_index[0];
-                        query_index[remaining_vars[1]] = control_index[1];
+                    for (let j = 0; j < arrays1[1].length; j++) {
+                        for (let i = 0; i < arrays1[0].length; i++) {
+                            query_index[chosen_vars[0]] = i;
+                            query_index[chosen_vars[1]] = j;
+                            query_index[remaining_vars[0]] = control_index[0];
+                            query_index[remaining_vars[1]] = control_index[1];
 
-                        let gpd_val = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
-                        // Use valueToZ for correct z position
-                        const z = valueToZ(gpd_val, current_range[0], current_range[1], zStart, zEnd);
+                            let gpd_val = gpd_4d.get(query_index[0], query_index[1], query_index[2], query_index[3]);
+                            // Use valueToZ for correct z position
+                            const z = valueToZ(gpd_val, current_range[0], current_range[1], zStart, zEnd);
 
-                        let vertex = geometry.attributes.position;
-                        vertex.setZ(j * arrays1[0].length + i, z);
+                            let vertex = geometry.attributes.position;
+                            vertex.setZ(j * arrays1[0].length + i, z);
 
-                        let normalized_gpd = (gpd_val - current_range[0]) / (current_range[1] - current_range[0]);
-                        let color = evaluate_cmap(normalized_gpd, current_colormap, false);
-                        colors[(j * arrays1[0].length + i) * 3] = color[0] / 255.;
-                        colors[(j * arrays1[0].length + i) * 3 + 1] = color[1] / 255.;
-                        colors[(j * arrays1[0].length + i) * 3 + 2] = color[2] / 255.;
+                            let normalized_gpd = (gpd_val - current_range[0]) / (current_range[1] - current_range[0]);
+                            let color = evaluate_cmap(normalized_gpd, current_colormap, false);
+                            colors[(j * arrays1[0].length + i) * 3] = color[0] / 255.;
+                            colors[(j * arrays1[0].length + i) * 3 + 1] = color[1] / 255.;
+                            colors[(j * arrays1[0].length + i) * 3 + 2] = color[2] / 255.;
+                        }
+                    }
+                    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                    positions.needsUpdate = true;
+                    geometry.computeVertexNormals();
+
+                    if (multi_surface_active !== null) {
+                        updateMultipleSurfaces(zStart, zEnd);
                     }
                 }
-                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-                positions.needsUpdate = true;
-                geometry.computeVertexNormals();
+
+                render3DScene();
             }
-    
-            render3DScene();
         }
         renderer.setAnimationLoop( animate );
     
@@ -1491,9 +1580,9 @@ function gpdVis() {
     
         function resetView() {
             // Reset main camera
-            camera.position.set(0.147, -0.898, 0.165);
-            camera.quaternion.set(0.658, -0.102, -0.070, 0.743);
-            camera.up.set(-0.094, -0.145, 0.985);
+            camera.position.set(0.737, -0.840, 0.108);
+            camera.quaternion.set(0.676, 0.057, 0.067, 0.732);
+            camera.up.set(0.027, -0.196, 0.980);
             camera.updateProjectionMatrix();
             controls.target.set(0.5, 0.5, 0);
             controls.update();
@@ -1527,6 +1616,7 @@ function gpdVis() {
                     play_slider_btn1.innerHTML = '<i class="fas fa-play"></i>';
                     clearInterval(window.slider1Interval);
                     window.slider1Interval = null;
+                    updateToggleViewBtnState();
                 }
             });
             slider1.noUiSlider.on('update', function (values, handle) {
@@ -1540,8 +1630,8 @@ function gpdVis() {
                         updateXArray(value);
                     }
 
-                    if (multi_surface_active !== null) {
-                        showMultipleSurfaces(multi_surface_active);
+                    if (!is_2d_view && multi_surface_active !== null) {
+                        updateMultipleSurfaces();
                     }
                     // Update view depending on current mode
                     updateCurrentRange();
@@ -1564,6 +1654,7 @@ function gpdVis() {
                     play_slider_btn2.innerHTML = '<i class="fas fa-play"></i>';
                     clearInterval(window.slider2Interval);
                     window.slider2Interval = null;
+                    updateToggleViewBtnState();
                 }
             });
             slider2.noUiSlider.on('update', function (values, handle) {
@@ -1577,8 +1668,8 @@ function gpdVis() {
                         updateXArray(value);
                     }
 
-                    if (multi_surface_active !== null) {
-                        showMultipleSurfaces(multi_surface_active);
+                    if (!is_2d_view && multi_surface_active !== null) {
+                        updateMultipleSurfaces();
                     }
                     // Update view depending on current mode
                     updateCurrentRange();
@@ -1619,19 +1710,96 @@ function gpdVis() {
                 clearInterval(window.slider2Interval);
                 window.slider2Interval = null;
             }
+            updateToggleViewBtnState();
         }
     
-        function showMultipleSurfaces(idx) {
-            stopAllAnimations();
-        
-            // If the button for the active slider is clicked again, clear the surfaces.
+        function updateMultipleSurfaces(zStart, zEnd) {
+            if (multi_surface_active === null || is_2d_view || !scene || !geometry) return;
+
+            if (zStart === undefined || zEnd === undefined) {
+                const zRange = drawZAxis(scene, current_range[0], current_range[1], [min_axis1, max_axis1], [min_axis2, max_axis2]);
+                zStart = zRange[0];
+                zEnd = zRange[1];
+            }
+
+            const count = geometry.attributes.position.count;
+
+            // Check if existing replica meshes need creation or re-creation
+            const needsCreate = !scene.__multiSurfaces || 
+                                scene.__multiSurfaces.length !== nreplicas || 
+                                !scene.__multiSurfaces[0].geometry || 
+                                scene.__multiSurfaces[0].geometry.attributes.position.count !== count;
+
+            if (needsCreate) {
+                if (scene.__multiSurfaces) {
+                    scene.__multiSurfaces.forEach(m => {
+                        if (m.geometry) m.geometry.dispose();
+                        if (m.material) m.material.dispose();
+                        scene.remove(m);
+                    });
+                }
+                scene.__multiSurfaces = [];
+
+                for (let r = 0; r < nreplicas; r++) {
+                    let surfaceGeometry = geometry.clone();
+                    let surfaceMaterial = material.clone();
+                    surfaceMaterial.transparent = true;
+                    surfaceMaterial.opacity = 0.5;
+                    let surfaceColors = new Float32Array(count * 3);
+                    surfaceGeometry.setAttribute('color', new THREE.BufferAttribute(surfaceColors, 3));
+                    let mesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+                    scene.add(mesh);
+                    scene.__multiSurfaces.push(mesh);
+                }
+            }
+
+            // Update vertex positions (X, Y, Z) and colors for each replica in-place
+            let query_index = [0, 0, 0, 0];
+            query_index[remaining_vars[0]] = control_index[0];
+            query_index[remaining_vars[1]] = control_index[1];
+
+            const mainPositions = geometry.attributes.position;
+
+            for (let r = 0; r < nreplicas; r++) {
+                const mesh = scene.__multiSurfaces[r];
+                const surfacePositions = mesh.geometry.attributes.position;
+                const surfaceColors = mesh.geometry.attributes.color.array;
+
+                for (let j = 0; j < arrays1[1].length; j++) {
+                    for (let i = 0; i < arrays1[0].length; i++) {
+                        const idx = j * arrays1[0].length + i;
+                        query_index[chosen_vars[0]] = i;
+                        query_index[chosen_vars[1]] = j;
+
+                        let gpd_raw_value = gpd_5d.get(query_index[0], query_index[1], query_index[2], query_index[3], r);
+                        const z_value = valueToZ(gpd_raw_value, current_range[0], current_range[1], zStart, zEnd);
+                        
+                        surfacePositions.setX(idx, mainPositions.getX(idx));
+                        surfacePositions.setY(idx, mainPositions.getY(idx));
+                        surfacePositions.setZ(idx, z_value);
+
+                        let normalized_gpd = (gpd_raw_value - current_range[0]) / (current_range[1] - current_range[0]);
+                        let color = evaluate_cmap(normalized_gpd, current_colormap, false);
+                        surfaceColors[idx * 3] = color[0] / 255.;
+                        surfaceColors[idx * 3 + 1] = color[1] / 255.;
+                        surfaceColors[idx * 3 + 2] = color[2] / 255.;
+                    }
+                }
+
+                surfacePositions.needsUpdate = true;
+                mesh.geometry.attributes.color.needsUpdate = true;
+                mesh.geometry.computeVertexNormals();
+            }
+        }
+
+        function toggleMultipleSurfaces(idx) {
+            // If already active on the same button, toggle off
             if (multi_surface_active === idx) {
                 clearMultiSurface();
                 return;
             }
-        
+
             multi_surface_active = idx;
-            // Toggle button styles
             if (multi_surface_btn1) {
                 multi_surface_btn1.classList.toggle('btn-secondary', idx === 0);
                 multi_surface_btn1.classList.toggle('btn-outline-secondary', idx !== 0);
@@ -1640,63 +1808,16 @@ function gpdVis() {
                 multi_surface_btn2.classList.toggle('btn-secondary', idx === 1);
                 multi_surface_btn2.classList.toggle('btn-outline-secondary', idx !== 1);
             }
-        
-            const surfaces = [];
-        
-            for (let r = 0; r < nreplicas; r++) {
-                // Opacity can be uniform or varied
-                const opacity = 0.5;
-        
-                let surfaceGeometry = geometry.clone();
-                let surfaceMaterial = material.clone();
-                surfaceMaterial.transparent = true;
-                surfaceMaterial.opacity = opacity;
-                let surfacePositions = surfaceGeometry.attributes.position;
-                let surfaceColors = new Float32Array(surfacePositions.count * 3);
-        
-                const [zStart, zEnd] = drawZAxis(scene, current_range[0], current_range[1], [min_axis1, max_axis1], [min_axis2, max_axis2]);
-        
-                for (let j = 0; j < surfacePositions.count; j++) {
-                    let axis2_index = Math.floor(j / arrays1[0].length);
-                    let axis1_index = j % arrays1[0].length;
-        
-                    let query_index = [0, 0, 0, 0];
-                    query_index[chosen_vars[0]] = axis1_index;
-                    query_index[chosen_vars[1]] = axis2_index;
-                    query_index[remaining_vars[0]] = control_index[0];
-                    query_index[remaining_vars[1]] = control_index[1];
-        
-                    let gpd_raw_value = gpd_5d.get(query_index[0], query_index[1], query_index[2], query_index[3], r);
-                    
-                    // Use valueToZ for correct z position based on the current range (local or global)
-                    const z_value = valueToZ(gpd_raw_value, current_range[0], current_range[1], zStart, zEnd);
-                    surfacePositions.setZ(j, z_value);
-        
-                    let normalized_gpd = (gpd_raw_value - current_range[0]) / (current_range[1] - current_range[0]);
-                    let color = evaluate_cmap(normalized_gpd, current_colormap, false);
-                    surfaceColors[j * 3] = color[0] / 255.;
-                    surfaceColors[j * 3 + 1] = color[1] / 255.;
-                    surfaceColors[j * 3 + 2] = color[2] / 255.;
-                }
-        
-                surfaceGeometry.setAttribute('color', new THREE.BufferAttribute(surfaceColors, 3));
-                surfacePositions.needsUpdate = true;
-                surfaceGeometry.computeVertexNormals();
-                let mesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
-                surfaces.push(mesh);
-            }
-        
-            // Remove previous multi-surface from scene
-            if (scene.__multiSurfaces) {
-                scene.__multiSurfaces.forEach(m => scene.remove(m));
-            }
-        
-            // Add new ones
-            surfaces.forEach(m => scene.add(m));
-            scene.__multiSurfaces = surfaces;
-            renderer.render(scene, camera);
+
+            slider_changed = true;
+            updateMultipleSurfaces();
+            render3DScene();
         }
-    
+
+        function showMultipleSurfaces(idx) {
+            toggleMultipleSurfaces(idx);
+        }
+
         function clearMultiSurface() {
             multi_surface_active = null;
             if (multi_surface_btn1) {
@@ -1714,19 +1835,20 @@ function gpdVis() {
                     scene.remove(m);
                 });
                 scene.__multiSurfaces = [];
-                renderer.render(scene, camera);
+                render3DScene();
             }
         }
-    
+
         multi_surface_btn1.addEventListener('click', function() {
-            showMultipleSurfaces(0);
+            toggleMultipleSurfaces(0);
         });
         multi_surface_btn2.addEventListener('click', function() {
-            showMultipleSurfaces(1);
+            toggleMultipleSurfaces(1);
         });
     
         if (dropdown1) {
             dropdown1.addEventListener('change', function() {
+                stopAllAnimations();
                 const selectedValue = Number(dropdown1.value);
                 if (selectedValue == chosen_vars[1]){
                     showNotification("Please select two different axes!", "warning");
@@ -1752,6 +1874,7 @@ function gpdVis() {
         }
         if (dropdown2) {
             dropdown2.addEventListener('change', function() {
+                stopAllAnimations();
                 const selectedValue = Number(dropdown2.value);
                 if (selectedValue == chosen_vars[0]){
                     showNotification("Please select two different axes!", "warning");
@@ -1778,6 +1901,9 @@ function gpdVis() {
     
         if (toggle_view_btn) {
             toggle_view_btn.addEventListener('click', () => {
+                if (window.slider1Playing || window.slider2Playing) {
+                    return;
+                }
                 is_2d_view = !is_2d_view;
                 toggle_view_btn.innerHTML = is_2d_view
                     ? '<i class="fas fa-globe me-1"></i>3D View'
@@ -1790,14 +1916,7 @@ function gpdVis() {
                         quaternion: camera.quaternion.clone(),
                         up: camera.up.clone()
                     };
-                    three_container.style.display = 'none';
-                    heatmap_container.style.display = 'block';
-                    heatmap_controls.style.display = 'flex';
-                    drawHeatmap();
                 } else {
-                    three_container.style.display = 'block';
-                    heatmap_container.style.display = 'none';
-                    heatmap_controls.style.display = 'none';
                     // Restore 3D camera state
                     if (camera_3d_state.position) {
                         camera.position.copy(camera_3d_state.position);
@@ -1806,23 +1925,12 @@ function gpdVis() {
                         controls.update();
                     }
                 }
+                updateViewMode();
             });
         }
 
         if (reset_view_btn) {
             reset_view_btn.addEventListener('click', resetView);
-        }
-
-        if (num_surfaces_input) {
-            num_surfaces_input.addEventListener('change', function() {
-                let val = parseInt(num_surfaces_input.value, 10);
-                if (isNaN(val) || val < 1) val = 1;
-                if (val > 50) val = 50;
-                num_surfaces = val;
-                num_surfaces_input.value = val;
-                if (multi_surface_active === 0) showMultipleSurfaces(0);
-                if (multi_surface_active === 1) showMultipleSurfaces(1);
-            });
         }
     
         if (colormap_select) {
@@ -1831,6 +1939,11 @@ function gpdVis() {
                 updateColorbar(current_range[0], current_range[1], current_colormap);
                 if (is_2d_view) {
                     drawHeatmap();
+                } else {
+                    slider_changed = true;
+                    if (multi_surface_active !== null) {
+                        updateMultipleSurfaces();
+                    }
                 }
             });
         }
@@ -1849,6 +1962,7 @@ function gpdVis() {
 
         if (range_toggle_btn) {
             range_toggle_btn.addEventListener('click', () => {
+                stopAllAnimations();
                 use_local_range = !use_local_range;
                 range_toggle_btn.innerHTML = use_local_range
                     ? '<i class="fas fa-chart-line me-1"></i> Local Range'
@@ -1869,6 +1983,9 @@ function gpdVis() {
                 }
                 // Also update colorbar
                 updateColorbar(current_range[0], current_range[1], current_colormap);
+                if (is_2d_view) {
+                    drawHeatmap();
+                }
             });
         }
 
@@ -1886,15 +2003,13 @@ function gpdVis() {
             });
         }
 
-        window.addEventListener('DOMContentLoaded', () => {
-            applyBackground(current_background);
-        });
-
         // Window resize handling
         window.addEventListener('resize', function() {
-            camera.aspect = three_container.clientWidth / three_container.clientHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(three_container.clientWidth, three_container.clientHeight);
+            if (!is_2d_view && three_container.clientWidth > 0 && three_container.clientHeight > 0) {
+                camera.aspect = three_container.clientWidth / three_container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(three_container.clientWidth, three_container.clientHeight);
+            }
             if (is_2d_view) {
                 drawHeatmap();
             }
@@ -1902,19 +2017,7 @@ function gpdVis() {
     
         // Keyboard shortcuts
         window.addEventListener('keydown', function(event) {
-            if (event.key === 'c') {
-                const pos = camera.position;
-                const quat = camera.quaternion;
-                const target = controls.target;
-                const up = camera.up;
-                console.log('// Current camera state:');
-                console.log(`camera.position.set(${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}, ${pos.z.toFixed(3)});`);
-                console.log(`camera.quaternion.set(${quat.x.toFixed(3)}, ${quat.y.toFixed(3)}, ${quat.z.toFixed(3)}, ${quat.w.toFixed(3)});`);
-                console.log(`camera.up.set(${up.x.toFixed(3)}, ${up.y.toFixed(3)}, ${up.z.toFixed(3)});`);
-                console.log(`controls.target.set(${target.x.toFixed(3)}, ${target.y.toFixed(3)}, ${target.z.toFixed(3)});`);
-                console.log(`camera.zoom.set(${camera.zoom.toFixed(3)});`);
-            }
-            else if (event.ctrlKey && event.key === 'r') {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'r') {
                 event.preventDefault();
                 resetView();
             }

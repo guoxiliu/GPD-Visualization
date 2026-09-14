@@ -186,14 +186,17 @@ export function evaluate_cmap(x, name, reverse) {
    * @return {list} - A 3-tuple (R, G, B) containing the color assigned to `x`.
    */
 
-  // Ensure that the value of `x` is valid (i.e., 0 <= x <= 1)
-  if (!(0 <= x  && x <= 1)) {
-    alert('Illegal value for x! Must be in [0, 1].')
+  // Ensure x is a valid number clamped between 0 and 1
+  if (isNaN(x) || x === null || x === undefined) {
+    x = 0;
+  } else {
+    x = Math.max(0, Math.min(1, x));
   }
 
   // Ensure that `name` is a valid colormap
   if (!(name in data)) {
-    alert('Colormap ' + name + 'does not exist!');
+    console.warn(`Colormap ${name} does not exist, defaulting to coolwarm`);
+    name = 'coolwarm';
   }
 
   // We can get the reverse colormap by evaluating colormap(1-x)
